@@ -11,7 +11,7 @@ from datetime import datetime
 import subprocess
 
 class NodeSettingsFrame(ttk.Frame):
-    settings_file = r"C:\temp\node_settings.txt"  # Class-level attribute with full path
+    settings_file = r"C:\temp\node.txt"  # Class-level attribute with full path
 
     def __init__(self, parent):
         self.settings_file = NodeSettingsFrame.settings_file  # Instance attribute
