@@ -7,7 +7,10 @@ import random
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
-    # Default testnet node settings
+    # Config file location
+    CONFIG_FILE = r"C:\temp\node_settings.txt"
+
+    # Default testnet node settings (will be overridden by config file if it exists)
     NODE_URL = 'localhost'
     NODE_PORT = '8332'
     RPC_USER = 'your_rpc_username'
@@ -18,6 +21,32 @@ class BitcoinUtils:
     MOCK_MODE = True  # Default to mock mode if node connection fails
     MOCK_BLOCKCHAIN_HEIGHT = 800000
     MOCK_NETWORK = "testnet"
+
+    @classmethod
+    def load_config(cls):
+        """Load configuration from C:\temp\node_settings.txt"""
+        try:
+            if os.path.exists(cls.CONFIG_FILE):
+                with open(cls.CONFIG_FILE, 'r') as f:
+                    settings = {}
+                    for line in f:
+                        if line.startswith('#') or '=' not in line:
+                            continue
+                        key, value = line.strip().split('=', 1)
+                        settings[key] = value
+
+                    # Update class attributes with loaded settings
+                    cls.NODE_URL = settings.get('url', cls.NODE_URL)
+                    cls.NODE_PORT = settings.get('port', cls.NODE_PORT)
+                    cls.RPC_USER = settings.get('username', cls.RPC_USER)
+                    cls.RPC_PASS = settings.get('password', cls.RPC_PASS)
+
+                    print(f"Loaded configuration from {cls.CONFIG_FILE}")
+                    return True
+        except Exception as e:
+            print(f"Error loading config: {str(e)}")
+            return False
+        return False
 
     @classmethod
     def configure_node(cls, node_url: str, port: str, rpc_user: str, rpc_pass: str):
@@ -32,6 +61,10 @@ class BitcoinUtils:
     @classmethod
     def get_rpc_connection(cls) -> AuthServiceProxy:
         """Get or create RPC connection to Bitcoin node."""
+        # Try to load config first
+        if cls._rpc_connection is None:
+            cls.load_config()
+
         if cls._rpc_connection is None:
             if not all([cls.RPC_USER, cls.RPC_PASS]):
                 raise ValueError("Bitcoin node credentials not configured.")

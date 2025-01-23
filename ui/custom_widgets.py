@@ -13,8 +13,10 @@ import subprocess
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.config_file = r"C:\temp\node_settings.txt"
+        self.config_file = BitcoinUtils.CONFIG_FILE
         self.setup_ui()
+        # Load settings from config file
+        BitcoinUtils.load_config()
         self.load_default_settings()
 
     def setup_ui(self):
@@ -88,51 +90,18 @@ class NodeSettingsFrame(ttk.Frame):
         self.status_label.pack()
 
     def load_default_settings(self):
-        """Load settings from C:\temp\node_settings.txt if it exists, otherwise use defaults"""
-        try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r') as f:
-                    settings = {}
-                    for line in f:
-                        if line.startswith('#') or '=' not in line:
-                            continue
-                        key, value = line.strip().split('=', 1)
-                        settings[key] = value
+        """Load settings from BitcoinUtils after config file has been loaded"""
+        self.url_entry.delete(0, tk.END)
+        self.url_entry.insert(0, BitcoinUtils.NODE_URL)
 
-                self.url_entry.delete(0, tk.END)
-                self.url_entry.insert(0, settings.get('url', BitcoinUtils.NODE_URL))
+        self.port_entry.delete(0, tk.END)
+        self.port_entry.insert(0, BitcoinUtils.NODE_PORT)
 
-                self.port_entry.delete(0, tk.END)
-                self.port_entry.insert(0, settings.get('port', BitcoinUtils.NODE_PORT))
+        self.username_entry.delete(0, tk.END)
+        self.username_entry.insert(0, BitcoinUtils.RPC_USER)
 
-                self.username_entry.delete(0, tk.END)
-                self.username_entry.insert(0, settings.get('username', BitcoinUtils.RPC_USER))
-
-                self.password_entry.delete(0, tk.END)
-                self.password_entry.insert(0, settings.get('password', BitcoinUtils.RPC_PASS))
-
-                # Update BitcoinUtils with loaded settings
-                BitcoinUtils.configure_node(
-                    settings.get('url', BitcoinUtils.NODE_URL),
-                    settings.get('port', BitcoinUtils.NODE_PORT),
-                    settings.get('username', BitcoinUtils.RPC_USER),
-                    settings.get('password', BitcoinUtils.RPC_PASS)
-                )
-            else:
-                # Load default settings from BitcoinUtils
-                self.url_entry.delete(0, tk.END)
-                self.url_entry.insert(0, BitcoinUtils.NODE_URL)
-
-                self.port_entry.delete(0, tk.END)
-                self.port_entry.insert(0, BitcoinUtils.NODE_PORT)
-
-                self.username_entry.delete(0, tk.END)
-                self.username_entry.insert(0, BitcoinUtils.RPC_USER)
-
-                self.password_entry.delete(0, tk.END)
-                self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load settings: {str(e)}")
+        self.password_entry.delete(0, tk.END)
+        self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
 
     def save_settings(self):
         """Save settings to C:\temp\node_settings.txt"""
