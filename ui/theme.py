@@ -2,13 +2,17 @@ import tkinter as tk
 from tkinter import ttk
 
 def setup_theme(root):
-    """Setup custom theme for the Bitcoin educational application."""
+    """Setup dark theme for the Bitcoin educational application."""
 
     # Define colors
-    BITCOIN_ORANGE = "#F7931A"
-    DARK_GRAY = "#2D2D2D"
-    LIGHT_GRAY = "#F5F5F5"
-    WHITE = "#FFFFFF"
+    DARK_BG = "#1E1E1E"
+    DARKER_BG = "#252526"
+    ACCENT = "#569CD6"  # Soft blue accent
+    TEXT = "#D4D4D4"
+    SECONDARY_TEXT = "#808080"
+
+    # Configure root window
+    root.configure(bg=DARK_BG)
 
     # Configure styles
     style = ttk.Style(root)
@@ -16,63 +20,71 @@ def setup_theme(root):
     # Configure main theme
     style.configure(
         "TFrame",
-        background=WHITE
+        background=DARK_BG
     )
 
     style.configure(
         "TLabel",
-        background=WHITE,
-        foreground=DARK_GRAY,
-        font=("Helvetica", 10)
+        background=DARK_BG,
+        foreground=TEXT,
+        font=("Segoe UI", 10)
     )
 
     style.configure(
         "Title.TLabel",
-        font=("Helvetica", 24, "bold"),
-        foreground=BITCOIN_ORANGE
+        font=("Segoe UI", 20, "bold"),
+        foreground=ACCENT
     )
 
     style.configure(
         "Topic.TLabel",
-        font=("Helvetica", 14, "bold"),
-        foreground=DARK_GRAY
-    )
-
-    style.configure(
-        "Transaction.TLabel",
-        font=("Helvetica", 12, "italic"),
-        foreground=DARK_GRAY
+        font=("Segoe UI", 12, "bold"),
+        foreground=TEXT
     )
 
     style.configure(
         "TButton",
-        background=BITCOIN_ORANGE,
-        foreground=WHITE,
+        background=DARKER_BG,
+        foreground=TEXT,
         padding=(10, 5),
-        font=("Helvetica", 10)
+        font=("Segoe UI", 10)
+    )
+
+    style.map(
+        "TButton",
+        background=[("active", ACCENT)],
+        foreground=[("active", DARK_BG)]
     )
 
     style.configure(
         "TNotebook",
-        background=WHITE,
+        background=DARK_BG,
         tabmargins=[2, 5, 2, 0]
     )
 
     style.configure(
         "TNotebook.Tab",
-        background=LIGHT_GRAY,
-        foreground=DARK_GRAY,
-        padding=[10, 2],
-        font=("Helvetica", 10)
+        background=DARKER_BG,
+        foreground=TEXT,
+        padding=[15, 5],
+        font=("Segoe UI", 10)
     )
 
     style.map(
         "TNotebook.Tab",
-        background=[("selected", BITCOIN_ORANGE)],
-        foreground=[("selected", WHITE)]
+        background=[("selected", ACCENT)],
+        foreground=[("selected", DARK_BG)]
     )
 
-    # Configure text widget
-    root.option_add("*Text.background", LIGHT_GRAY)
-    root.option_add("*Text.foreground", DARK_GRAY)
-    root.option_add("*Text.font", ("Courier", 10))
+    # Configure text widget colors
+    root.option_add("*Text.background", DARKER_BG)
+    root.option_add("*Text.foreground", TEXT)
+    root.option_add("*Text.font", ("Consolas", 10))
+
+    # Entry widget configuration
+    style.configure(
+        "TEntry",
+        fieldbackground=DARKER_BG,
+        foreground=TEXT,
+        padding=5
+    )
