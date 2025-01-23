@@ -5,4 +5,5 @@ description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
     "python-bitcoinrpc>=1.0",
+    "tk>=0.1.0",
 ]
