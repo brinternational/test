@@ -6,6 +6,130 @@ from sha256_visualizer import SHA256Visualizer
 from bitcoin_utils import BitcoinUtils
 from wallet_scanner import WalletScanner
 from tkinter import messagebox
+import os
+
+class NodeSettingsFrame(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setup_ui()
+        self.load_settings()
+
+    def setup_ui(self):
+        # Title
+        title = ttk.Label(
+            self,
+            text="Bitcoin Node Settings",
+            style="Title.TLabel"
+        )
+        title.pack(pady=20)
+
+        # Settings form
+        form = ttk.Frame(self)
+        form.pack(fill=tk.X, padx=20, pady=10)
+
+        # Node URL
+        ttk.Label(form, text="Node URL:").grid(row=0, column=0, padx=5, pady=5)
+        self.url_entry = ttk.Entry(form, width=40)
+        self.url_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.url_entry.insert(0, "localhost")
+
+        # Node Port
+        ttk.Label(form, text="Port:").grid(row=1, column=0, padx=5, pady=5)
+        self.port_entry = ttk.Entry(form, width=40)
+        self.port_entry.grid(row=1, column=1, padx=5, pady=5)
+        self.port_entry.insert(0, "8332")
+
+        # RPC Username
+        ttk.Label(form, text="RPC Username:").grid(row=2, column=0, padx=5, pady=5)
+        self.username_entry = ttk.Entry(form, width=40)
+        self.username_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        # RPC Password
+        ttk.Label(form, text="RPC Password:").grid(row=3, column=0, padx=5, pady=5)
+        self.password_entry = ttk.Entry(form, width=40, show="*")
+        self.password_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        # Save button
+        save_btn = ttk.Button(
+            form,
+            text="Save Settings",
+            command=self.save_settings
+        )
+        save_btn.grid(row=4, column=0, columnspan=2, pady=20)
+
+        # Status message
+        self.status_label = ttk.Label(
+            form,
+            text="Settings will be saved to: C:\\temp\\node.txt",
+            style="Topic.TLabel"
+        )
+        self.status_label.grid(row=5, column=0, columnspan=2, pady=10)
+
+    def save_settings(self):
+        """Save node settings to C:\temp\node.txt"""
+        try:
+            os.makedirs(r"C:\temp", exist_ok=True)
+
+            settings = {
+                "url": self.url_entry.get(),
+                "port": self.port_entry.get(),
+                "username": self.username_entry.get(),
+                "password": self.password_entry.get()
+            }
+
+            with open(r"C:\temp\node.txt", "w") as f:
+                for key, value in settings.items():
+                    f.write(f"{key}={value}\n")
+
+            # Update Bitcoin Utils with new settings
+            BitcoinUtils.configure_node(
+                settings["url"],
+                settings["port"],
+                settings["username"],
+                settings["password"]
+            )
+
+            self.status_label.config(
+                text="Settings saved successfully to C:\\temp\\node.txt",
+                foreground="green"
+            )
+            messagebox.showinfo("Success", "Node settings saved successfully!")
+
+        except Exception as e:
+            self.status_label.config(
+                text=f"Error saving settings: {str(e)}",
+                foreground="red"
+            )
+            messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
+
+    def load_settings(self):
+        """Load existing settings if available"""
+        try:
+            if os.path.exists(r"C:\temp\node.txt"):
+                settings = {}
+                with open(r"C:\temp\node.txt", "r") as f:
+                    for line in f:
+                        key, value = line.strip().split("=", 1)
+                        settings[key] = value
+
+                # Update entry fields
+                self.url_entry.delete(0, tk.END)
+                self.url_entry.insert(0, settings.get("url", "localhost"))
+
+                self.port_entry.delete(0, tk.END)
+                self.port_entry.insert(0, settings.get("port", "8332"))
+
+                self.username_entry.delete(0, tk.END)
+                self.username_entry.insert(0, settings.get("username", ""))
+
+                self.password_entry.delete(0, tk.END)
+                self.password_entry.insert(0, settings.get("password", ""))
+
+        except Exception as e:
+            self.status_label.config(
+                text=f"Error loading settings: {str(e)}",
+                foreground="red"
+            )
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):

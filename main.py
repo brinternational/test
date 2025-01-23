@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import sys
 from ui.theme import setup_theme
-from ui.custom_widgets import EducationalFrame, WalletFrame, SHA256Frame
+from ui.custom_widgets import EducationalFrame, WalletFrame, SHA256Frame, NodeSettingsFrame
 
 class BitcoinEducationApp(tk.Tk):
     def __init__(self):
@@ -36,10 +36,12 @@ class BitcoinEducationApp(tk.Tk):
             self.educational_frame = EducationalFrame(self.notebook)
             self.wallet_frame = WalletFrame(self.notebook)
             self.sha256_frame = SHA256Frame(self.notebook)
+            self.node_settings_frame = NodeSettingsFrame(self.notebook)
 
             self.notebook.add(self.educational_frame, text="Learn")
             self.notebook.add(self.wallet_frame, text="Wallet")
             self.notebook.add(self.sha256_frame, text="SHA256")
+            self.notebook.add(self.node_settings_frame, text="Node Settings")
 
             # Simple status bar
             self.status_bar = ttk.Label(
