@@ -57,21 +57,45 @@ class NodeSettingsFrame(ttk.Frame):
         self.password_entry = ttk.Entry(form, width=40, show="*")
         self.password_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
 
+        # Button frame
+        button_frame = ttk.Frame(form)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=20)
+
         # Save button
         save_btn = ttk.Button(
-            form,
+            button_frame,
             text="Save Settings",
             command=self.save_settings
         )
-        save_btn.grid(row=4, column=0, columnspan=2, pady=20)
+        save_btn.pack(side=tk.LEFT, padx=5)
 
-        # Status message
-        self.status_label = ttk.Label(
-            form,
-            text="Settings saved in memory",
-            style="Topic.TLabel"
+        # Test Connection button
+        test_btn = ttk.Button(
+            button_frame,
+            text="Test Connection",
+            command=self.test_connection
         )
-        self.status_label.grid(row=5, column=0, columnspan=2, pady=10)
+        test_btn.pack(side=tk.LEFT, padx=5)
+
+        # Connection status
+        self.status_frame = ttk.Frame(form)
+        self.status_frame.grid(row=5, column=0, columnspan=2, pady=10)
+
+        self.status_label = ttk.Label(
+            self.status_frame,
+            text="Not connected",
+            style="Topic.TLabel",
+            foreground="#D32F2F"  # Error red color
+        )
+        self.status_label.pack()
+
+        # Detailed status
+        self.detail_label = ttk.Label(
+            self.status_frame,
+            text="Click 'Test Connection' to verify node settings",
+            wraplength=400
+        )
+        self.detail_label.pack(pady=5)
 
     def load_default_settings(self):
         """Load default settings from BitcoinUtils"""
@@ -143,7 +167,7 @@ class NodeSettingsFrame(ttk.Frame):
             if success:
                 self.status_label.config(
                     text="Settings saved and pushed to git successfully",
-                    foreground="#4CAF50"  # Success green color
+                    foreground="#388E3C"  # Success green color
                 )
                 messagebox.showinfo("Success", "Node settings updated and pushed to git successfully")
             else:
@@ -157,9 +181,31 @@ class NodeSettingsFrame(ttk.Frame):
             error_message = f"Error saving settings: {str(e)}"
             self.status_label.config(
                 text=error_message,
-                foreground="#FF3333"  # Error red color
+                foreground="#D32F2F"  # Error red color
             )
             messagebox.showerror("Error", error_message)
+
+    def test_connection(self):
+        """Test connection to Bitcoin node and update status."""
+        self.status_label.config(text="Testing connection...")
+        self.detail_label.config(text="Please wait...")
+        self.update()  # Force UI update
+
+        success, message = BitcoinUtils.test_node_connection()
+
+        if success:
+            self.status_label.config(
+                text="Connected",
+                foreground="#388E3C"  # Success green
+            )
+        else:
+            self.status_label.config(
+                text="Not Connected",
+                foreground="#D32F2F"  # Error red
+            )
+
+        self.detail_label.config(text=message)
+
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):

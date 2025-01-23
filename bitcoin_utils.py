@@ -47,15 +47,43 @@ class BitcoinUtils:
         try:
             rpc = cls.get_rpc_connection()
             blockchain_info = rpc.getblockchaininfo()
+
+            # Check if node is syncing
+            if blockchain_info.get('initialblockdownload', True):
+                cls.MOCK_MODE = True
+                return False, (
+                    f"Node is still syncing:\n"
+                    f"Current Height: {blockchain_info.get('blocks', 0)}\n"
+                    f"Headers: {blockchain_info.get('headers', 0)}\n"
+                    f"Progress: {blockchain_info.get('verificationprogress', 0)*100:.2f}%"
+                )
+
             cls.MOCK_MODE = False
-            return True, f"Connected to node. Chain: {blockchain_info['chain']}, Blocks: {blockchain_info['blocks']}"
+            network = blockchain_info.get('chain', 'unknown')
+            blocks = blockchain_info.get('blocks', 0)
+            peers = rpc.getconnectioncount()
+
+            return True, (
+                f"Successfully connected to Bitcoin node\n"
+                f"Network: {network}\n"
+                f"Block Height: {blocks:,}\n"
+                f"Connected Peers: {peers}"
+            )
         except Exception as e:
             cls.MOCK_MODE = True
+            error_type = str(type(e).__name__)
+            if "ConnectionRefusedError" in str(e):
+                message = "Connection refused. Please check if the Bitcoin node is running."
+            elif "AuthenticationError" in str(e):
+                message = "Authentication failed. Please check your RPC username and password."
+            else:
+                message = f"Connection error: {str(e)}"
+
             return False, (
-                f"Using educational simulation mode.\n"
-                f"Mock Chain: {cls.MOCK_NETWORK}\n"
-                f"Mock Blocks: {cls.MOCK_BLOCKCHAIN_HEIGHT}\n"
-                f"(Original error: {str(e)})"
+                f"Using educational simulation mode\n"
+                f"Error: {message}\n"
+                f"Mock Network: {cls.MOCK_NETWORK}\n"
+                f"Mock Blocks: {cls.MOCK_BLOCKCHAIN_HEIGHT}"
             )
 
     @classmethod
