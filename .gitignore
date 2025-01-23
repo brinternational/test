@@ -41,3 +41,10 @@ ENV/
 
 # Local configuration
 .env
+
+# Temp directory
+/temp/
+C:/temp/
+C:\temp\
+temp/
+*.txt
