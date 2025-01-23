@@ -42,8 +42,14 @@ class WalletScanner:
         
     def _save_to_file(self, wallet_info: Dict):
         """Save wallet with balance to file."""
+        import os
+
+        # Ensure C:\temp directory exists
+        os.makedirs(r"C:\temp", exist_ok=True)
+
+        # Save to C:\temp\wallets.txt
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open('wallets_with_balance.txt', 'a') as f:
+        with open(r"C:\temp\wallets.txt", 'a') as f:
             f.write(f"\n=== Wallet Found at {timestamp} ===\n")
             f.write(f"Address: {wallet_info['address']}\n")
             f.write(f"Balance: {wallet_info['balance']} BTC\n")

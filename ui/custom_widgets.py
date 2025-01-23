@@ -58,6 +58,14 @@ class WalletFrame(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X, padx=20, pady=20)
 
+        # Add save location indicator
+        save_location = ttk.Label(
+            controls,
+            text="Saving wallets to: C:\\temp\\wallets.txt",
+            style="Topic.TLabel"
+        )
+        save_location.pack(side=tk.LEFT, padx=20)
+
         # Add educational mode indicator
         self.mode_label = ttk.Label(
             controls,
