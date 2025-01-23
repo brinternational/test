@@ -1,0 +1,51 @@
+import time
+from typing import Dict, List
+from datetime import datetime
+
+class WalletScanner:
+    def __init__(self):
+        self.total_scanned = 0
+        self.wallets_with_balance = []
+        self.start_time = None
+        self.scanning = False
+        
+    def start_scan(self):
+        """Start or resume scanning."""
+        self.start_time = time.time()
+        self.scanning = True
+        
+    def stop_scan(self):
+        """Stop scanning."""
+        self.scanning = False
+        
+    def add_wallet(self, wallet_info: Dict):
+        """Add a wallet to the scan results."""
+        self.total_scanned += 1
+        if wallet_info.get('balance', 0) > 0:
+            self.wallets_with_balance.append(wallet_info)
+            self._save_to_file(wallet_info)
+            
+    def get_scan_rate(self) -> float:
+        """Calculate wallets scanned per minute."""
+        if not self.start_time or not self.scanning:
+            return 0.0
+        elapsed_minutes = (time.time() - self.start_time) / 60
+        return self.total_scanned / elapsed_minutes if elapsed_minutes > 0 else 0
+        
+    def get_statistics(self) -> Dict:
+        """Get current scanning statistics."""
+        return {
+            'total_scanned': self.total_scanned,
+            'wallets_with_balance': len(self.wallets_with_balance),
+            'scan_rate': round(self.get_scan_rate(), 2)
+        }
+        
+    def _save_to_file(self, wallet_info: Dict):
+        """Save wallet with balance to file."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open('wallets_with_balance.txt', 'a') as f:
+            f.write(f"\n=== Wallet Found at {timestamp} ===\n")
+            f.write(f"Address: {wallet_info['address']}\n")
+            f.write(f"Balance: {wallet_info['balance']} BTC\n")
+            f.write(f"Last Transaction: {wallet_info['last_transaction']}\n")
+            f.write("="*40 + "\n")

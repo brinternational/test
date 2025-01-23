@@ -21,11 +21,15 @@ class BitcoinUtils:
         days_ago = random.randint(0, 365)
         last_transaction = datetime.now() - timedelta(days=days_ago)
 
+        # Add a small chance (1%) of having a balance for demonstration
+        balance = random.uniform(0.1, 2.0) if random.random() < 0.01 else 0.0
+
         return {
             "private_key": mock_private_key,
             "public_key": mock_public_key,
             "address": mock_address,
-            "last_transaction": last_transaction.strftime("%Y-%m-%d")
+            "last_transaction": last_transaction.strftime("%Y-%m-%d"),
+            "balance": balance
         }
 
     @staticmethod

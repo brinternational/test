@@ -4,6 +4,7 @@ from typing import List
 import wallet_generator
 from sha256_visualizer import SHA256Visualizer
 from bitcoin_utils import BitcoinUtils
+from wallet_scanner import WalletScanner
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):
@@ -48,6 +49,7 @@ class EducationalFrame(ttk.Frame):
 class WalletFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        self.wallet_scanner = WalletScanner()
         self.setup_ui()
 
     def setup_ui(self):
@@ -55,11 +57,40 @@ class WalletFrame(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X, padx=20, pady=20)
 
-        ttk.Button(
+        generate_btn = ttk.Button(
             controls,
             text="Generate New Seed Phrase",
             command=self.generate_seed
-        ).pack(side=tk.LEFT)
+        )
+        generate_btn.pack(side=tk.LEFT, padx=5)
+
+        self.scan_button = ttk.Button(
+            controls,
+            text="Start Scanning",
+            command=self.toggle_scanning
+        )
+        self.scan_button.pack(side=tk.LEFT, padx=5)
+
+        # Statistics Frame
+        stats_frame = ttk.LabelFrame(self, text="Scanning Statistics")
+        stats_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        # Progress Bar
+        self.progress_var = tk.DoubleVar()
+        self.progress = ttk.Progressbar(
+            stats_frame,
+            variable=self.progress_var,
+            mode='indeterminate'
+        )
+        self.progress.pack(fill=tk.X, padx=5, pady=5)
+
+        # Statistics Labels
+        self.stats_text = tk.StringVar(value="Total Scanned: 0 | With Balance: 0 | Rate: 0 wallets/min")
+        stats_label = ttk.Label(
+            stats_frame,
+            textvariable=self.stats_text
+        )
+        stats_label.pack(pady=5)
 
         # Display area
         self.display = ttk.Frame(self)
@@ -101,6 +132,32 @@ class WalletFrame(ttk.Frame):
         self.transaction_display.config(
             text=f"Last Transaction Date: {address_info['last_transaction']}"
         )
+
+        # Add to scanner
+        if self.wallet_scanner.scanning:
+            self.wallet_scanner.add_wallet(address_info)
+            self.update_statistics()
+
+    def toggle_scanning(self):
+        if not self.wallet_scanner.scanning:
+            self.wallet_scanner.start_scan()
+            self.scan_button.config(text="Stop Scanning")
+            self.progress.start()
+            self.after(1000, self.update_statistics)
+        else:
+            self.wallet_scanner.stop_scan()
+            self.scan_button.config(text="Start Scanning")
+            self.progress.stop()
+
+    def update_statistics(self):
+        if self.wallet_scanner.scanning:
+            stats = self.wallet_scanner.get_statistics()
+            self.stats_text.set(
+                f"Total Scanned: {stats['total_scanned']} | "
+                f"With Balance: {stats['wallets_with_balance']} | "
+                f"Rate: {stats['scan_rate']} wallets/min"
+            )
+            self.after(1000, self.update_statistics)
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
