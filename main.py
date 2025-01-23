@@ -3,14 +3,32 @@ from tkinter import ttk, messagebox
 import sys
 from ui.theme import setup_theme
 from ui.custom_widgets import EducationalFrame, WalletFrame, SHA256Frame, NodeSettingsFrame
+from version import get_version_info
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bitcoin_wallet.log')
+    ]
+)
 
 class BitcoinEducationApp(tk.Tk):
     def __init__(self):
         try:
             super().__init__()
 
+            # Log version information at startup
+            version_info = get_version_info()
+            logging.info(f"Starting Bitcoin Wallet Education v{version_info['version']}")
+            logging.info(f"Build Date: {version_info['build_date']}")
+            logging.info(f"Runtime: {version_info['runtime_timestamp']}")
+
             # Basic window setup
-            self.title("Bitcoin Wallet")
+            self.title(f"Bitcoin Wallet v{version_info['version']}")
             self.geometry("900x600")
 
             # Setup dark theme
@@ -43,23 +61,26 @@ class BitcoinEducationApp(tk.Tk):
             self.notebook.add(self.sha256_frame, text="SHA256")
             self.notebook.add(self.node_settings_frame, text="Node Settings")
 
-            # Simple status bar
+            # Simple status bar with version
+            status_text = f"Educational Mode Active - v{version_info['version']}"
             self.status_bar = ttk.Label(
                 self.container,
-                text="Educational Mode Active",
+                text=status_text,
                 style="TLabel"
             )
             self.status_bar.pack(pady=10)
 
         except Exception as e:
-            print(f"Error during initialization: {str(e)}", file=sys.stderr)
+            logging.error(f"Error during initialization: {str(e)}")
             messagebox.showerror("Error", f"Failed to start: {str(e)}")
             raise
 
     def show_about(self):
+        version_info = get_version_info()
         messagebox.showinfo(
             "About",
-            "Bitcoin Wallet Educational Tool\n\n"
+            f"Bitcoin Wallet Educational Tool v{version_info['version']}\n"
+            f"Built on: {version_info['build_date']}\n\n"
             "This application is designed to teach Bitcoin wallet concepts "
             "and SHA256 hashing in an interactive way."
         )
@@ -69,5 +90,5 @@ if __name__ == "__main__":
         app = BitcoinEducationApp()
         app.mainloop()
     except Exception as e:
-        print(f"Fatal error: {str(e)}", file=sys.stderr)
+        logging.error(f"Fatal error: {str(e)}")
         sys.exit(1)
