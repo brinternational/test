@@ -49,46 +49,57 @@ class WalletFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.setup_ui()
-        
+
     def setup_ui(self):
         # Controls
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X, padx=20, pady=20)
-        
+
         ttk.Button(
             controls,
             text="Generate New Seed Phrase",
             command=self.generate_seed
         ).pack(side=tk.LEFT)
-        
+
         # Display area
         self.display = ttk.Frame(self)
         self.display.pack(fill=tk.BOTH, expand=True, padx=20)
-        
+
         self.seed_display = ttk.Label(
             self.display,
             text="Click 'Generate' to create a new seed phrase",
             wraplength=600
         )
         self.seed_display.pack(pady=20)
-        
+
         self.address_display = ttk.Label(
             self.display,
             text="",
             wraplength=600
         )
-        self.address_display.pack(pady=20)
-        
+        self.address_display.pack(pady=10)
+
+        self.transaction_display = ttk.Label(
+            self.display,
+            text="",
+            wraplength=600,
+            style="Transaction.TLabel"
+        )
+        self.transaction_display.pack(pady=10)
+
     def generate_seed(self):
         words, _ = wallet_generator.WalletGenerator.generate_seed_phrase()
         self.seed_display.config(
             text="Seed Phrase:\n" + " ".join(words)
         )
-        
-        # Generate mock address
+
+        # Generate mock address and transaction data
         address_info = BitcoinUtils.derive_addresses(" ".join(words).encode())
         self.address_display.config(
             text=f"Generated Address:\n{address_info['address']}"
+        )
+        self.transaction_display.config(
+            text=f"Last Transaction Date: {address_info['last_transaction']}"
         )
 
 class SHA256Frame(ttk.Frame):

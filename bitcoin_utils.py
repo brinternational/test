@@ -1,6 +1,8 @@
 from typing import Dict, Optional
 import hashlib
 import hmac
+from datetime import datetime, timedelta
+import random
 
 class BitcoinUtils:
     @staticmethod
@@ -14,13 +16,18 @@ class BitcoinUtils:
         mock_private_key = hmac.new(seed, path.encode(), hashlib.sha512).hexdigest()
         mock_public_key = hashlib.sha256(mock_private_key.encode()).hexdigest()
         mock_address = "bc1q" + mock_public_key[:32]
-        
+
+        # Generate a random date within the last year for educational purposes
+        days_ago = random.randint(0, 365)
+        last_transaction = datetime.now() - timedelta(days=days_ago)
+
         return {
             "private_key": mock_private_key,
             "public_key": mock_public_key,
-            "address": mock_address
+            "address": mock_address,
+            "last_transaction": last_transaction.strftime("%Y-%m-%d")
         }
-    
+
     @staticmethod
     def check_balance(address: str) -> Optional[float]:
         """
@@ -30,7 +37,7 @@ class BitcoinUtils:
         # This is a mock implementation
         # In production, connect to actual Bitcoin node
         return 0.0
-    
+
     @staticmethod
     def validate_address(address: str) -> bool:
         """
@@ -39,7 +46,7 @@ class BitcoinUtils:
         """
         if not address:
             return False
-        
+
         # Basic format checking
         valid_prefixes = ['1', '3', 'bc1']
         return any(address.startswith(prefix) for prefix in valid_prefixes)
