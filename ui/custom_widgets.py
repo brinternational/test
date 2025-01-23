@@ -5,6 +5,7 @@ import wallet_generator
 from sha256_visualizer import SHA256Visualizer
 from bitcoin_utils import BitcoinUtils
 from wallet_scanner import WalletScanner
+from tkinter import messagebox
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):
@@ -70,6 +71,14 @@ class WalletFrame(ttk.Frame):
             command=self.toggle_scanning
         )
         self.scan_button.pack(side=tk.LEFT, padx=5)
+
+        # Add Node Test Button
+        test_node_btn = ttk.Button(
+            controls,
+            text="Test Node Connection",
+            command=self.test_node_connection
+        )
+        test_node_btn.pack(side=tk.LEFT, padx=5)
 
         # Statistics Frame
         stats_frame = ttk.LabelFrame(self, text="Scanning Statistics")
@@ -158,6 +167,14 @@ class WalletFrame(ttk.Frame):
                 f"Rate: {stats['scan_rate']} wallets/min"
             )
             self.after(1000, self.update_statistics)
+
+    def test_node_connection(self):
+        """Test connection to Bitcoin node and show result."""
+        success, message = BitcoinUtils.test_node_connection()
+        if success:
+            messagebox.showinfo("Node Connection", message)
+        else:
+            messagebox.showerror("Node Connection Error", message)
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
