@@ -15,6 +15,7 @@ class NodeSettingsFrame(ttk.Frame):
         super().__init__(parent)
         self.setup_ui()
         self.load_settings()
+        self.settings_file = "config/node_settings.txt"  # Project-relative path
 
     def setup_ui(self):
         # Title
@@ -62,7 +63,7 @@ class NodeSettingsFrame(ttk.Frame):
         # Status message
         self.status_label = ttk.Label(
             form,
-            text="Settings will be saved to: C:\\temp\\node.txt",
+            text=f"Settings will be saved to: {self.settings_file}",
             style="Topic.TLabel"
         )
         self.status_label.grid(row=5, column=0, columnspan=2, pady=10)
@@ -77,9 +78,10 @@ class NodeSettingsFrame(ttk.Frame):
             return False, f"Git commit failed: {str(e)}"
 
     def save_settings(self):
-        """Save node settings to C:\temp\node.txt"""
+        """Save node settings to the project config directory"""
         try:
-            os.makedirs(r"C:\temp", exist_ok=True)
+            # Create config directory if it doesn't exist
+            os.makedirs("config", exist_ok=True)
 
             settings = {
                 "url": self.url_entry.get(),
@@ -89,7 +91,7 @@ class NodeSettingsFrame(ttk.Frame):
                 "last_updated": datetime.now().strftime('%Y-%m-%d')
             }
 
-            with open(r"C:\temp\node.txt", "w") as f:
+            with open(self.settings_file, "w") as f:
                 f.write(f"# Node settings last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 for key, value in settings.items():
                     f.write(f"{key}={value}\n")
@@ -102,39 +104,30 @@ class NodeSettingsFrame(ttk.Frame):
                 settings["password"]
             )
 
-            # Commit changes to git
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            success, git_message = self.git_commit_changes(
-                f"Update node settings at {timestamp}"
-            )
-
-            status_message = "Settings saved successfully to C:\\temp\\node.txt"
-            if success:
-                status_message += "\nChanges committed to git"
-            else:
-                status_message += f"\nGit commit failed: {git_message}"
+            status_message = f"Settings saved successfully to {self.settings_file}"
 
             self.status_label.config(
                 text=status_message,
-                foreground="#00FF00"  # Bright green for better visibility
+                foreground="#4CAF50"  # Success green color
             )
             messagebox.showinfo("Success", status_message)
 
         except Exception as e:
+            error_message = f"Error saving settings: {str(e)}"
             self.status_label.config(
-                text=f"Error saving settings: {str(e)}",
-                foreground="#FF0000"  # Bright red for better visibility
+                text=error_message,
+                foreground="#FF3333"  # Error red color
             )
-            messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
+            messagebox.showerror("Error", error_message)
 
     def load_settings(self):
         """Load existing settings if available"""
         try:
-            if os.path.exists(r"C:\temp\node.txt"):
+            if os.path.exists(self.settings_file):
                 settings = {}
-                with open(r"C:\temp\node.txt", "r") as f:
+                with open(self.settings_file, "r") as f:
                     for line in f:
-                        if not line.startswith('#'): #skip comment lines
+                        if not line.startswith('#'):  # skip comment lines
                             key, value = line.strip().split("=", 1)
                             settings[key] = value
 
@@ -154,7 +147,7 @@ class NodeSettingsFrame(ttk.Frame):
         except Exception as e:
             self.status_label.config(
                 text=f"Error loading settings: {str(e)}",
-                foreground="#FF0000"  # Bright red for better visibility
+                foreground="#FF3333"  # Error red color
             )
 
 class EducationalFrame(ttk.Frame):

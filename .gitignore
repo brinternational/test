@@ -41,6 +41,8 @@ ENV/
 
 # Local configuration
 .env
+/config/
+config/*.txt
 
 # Temp directory
 /temp/
