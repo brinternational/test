@@ -13,7 +13,7 @@ import subprocess
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.settings_file = "config/node_settings.txt"  # Initialize before setup_ui
+        self.settings_file = r"C:\temp\node_settings.txt"  # Updated path
         self.setup_ui()
         self.load_settings()
 
@@ -78,10 +78,10 @@ class NodeSettingsFrame(ttk.Frame):
             return False, f"Git commit failed: {str(e)}"
 
     def save_settings(self):
-        """Save node settings to the project config directory"""
+        """Save node settings to C:\temp directory"""
         try:
-            # Create config directory if it doesn't exist
-            os.makedirs("config", exist_ok=True)
+            # Create C:\temp directory if it doesn't exist
+            os.makedirs(r"C:\temp", exist_ok=True)
 
             settings = {
                 "url": self.url_entry.get(),
@@ -149,6 +149,7 @@ class NodeSettingsFrame(ttk.Frame):
                 text=f"Error loading settings: {str(e)}",
                 foreground="#FF3333"  # Error red color
             )
+
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):
