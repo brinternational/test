@@ -24,7 +24,6 @@ var/
 .replit
 .breakpoints
 replit.nix
-.config/
 .upm/
 .cache/
 
@@ -41,8 +40,8 @@ ENV/
 
 # Local configuration
 .env
-/config/
-config/*.txt
+/config/*.txt
+!config/node_settings.txt
 
 # Temp directory
 /temp/
