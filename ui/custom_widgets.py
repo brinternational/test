@@ -8,10 +8,13 @@ from wallet_scanner import WalletScanner
 from tkinter import messagebox
 import os
 from datetime import datetime
+import subprocess
 
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        self.config_dir = "config"
+        self.config_file = os.path.join(self.config_dir, "node_settings.txt")
         self.setup_ui()
         self.load_default_settings()
 
@@ -84,9 +87,19 @@ class NodeSettingsFrame(ttk.Frame):
         self.password_entry.delete(0, tk.END)
         self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
 
-    def save_settings(self):
-        """Save settings to BitcoinUtils configuration"""
+    def git_commit_changes(self, message: str):
+        """Commit changes to git repository"""
         try:
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', message], check=True)
+            return True, "Changes committed to git successfully"
+        except subprocess.CalledProcessError as e:
+            return False, f"Git commit failed: {str(e)}"
+
+    def save_settings(self):
+        """Save settings to BitcoinUtils configuration and commit to git"""
+        try:
+            # Configure Bitcoin utils
             BitcoinUtils.configure_node(
                 self.url_entry.get(),
                 self.port_entry.get(),
@@ -94,10 +107,31 @@ class NodeSettingsFrame(ttk.Frame):
                 self.password_entry.get()
             )
 
+            # Ensure config directory exists
+            os.makedirs(self.config_dir, exist_ok=True)
+
+            # Save settings to file
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            with open(self.config_file, 'w') as f:
+                f.write(f"# Node settings last updated: {timestamp}\n")
+                f.write(f"url={self.url_entry.get()}\n")
+                f.write(f"port={self.port_entry.get()}\n")
+                f.write(f"username={self.username_entry.get()}\n")
+                f.write(f"password={self.password_entry.get()}\n")
+                f.write(f"last_updated={datetime.now().strftime('%Y-%m-%d')}\n")
+
+            # Commit changes to git
+            success, git_message = self.git_commit_changes(
+                f"Update node settings at {timestamp}"
+            )
+
+            # Update status label
             self.status_label.config(
                 text="Settings saved successfully",
                 foreground="#4CAF50"  # Success green color
             )
+
+            # Show success message
             messagebox.showinfo("Success", "Node settings updated successfully")
 
         except Exception as e:

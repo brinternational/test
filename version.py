@@ -2,7 +2,7 @@
 from datetime import datetime
 
 # Semantic versioning
-VERSION = "0.1.0"
+VERSION = "0.1.1"  # Updated version for git automation feature
 BUILD_TIMESTAMP = "2025-01-23 16:15:18"  # Updated whenever version.py is modified
 
 def get_version_info():
