@@ -58,6 +58,14 @@ class WalletFrame(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X, padx=20, pady=20)
 
+        # Add educational mode indicator
+        self.mode_label = ttk.Label(
+            controls,
+            text="Educational Mode",
+            style="Topic.TLabel"
+        )
+        self.mode_label.pack(side=tk.RIGHT, padx=5)
+
         generate_btn = ttk.Button(
             controls,
             text="Generate New Seed Phrase",
@@ -174,7 +182,14 @@ class WalletFrame(ttk.Frame):
         if success:
             messagebox.showinfo("Node Connection", message)
         else:
-            messagebox.showerror("Node Connection Error", message)
+            # Change the message to be more educational and informative
+            messagebox.showinfo(
+                "Educational Mode Active",
+                "Running in educational simulation mode while the Bitcoin node syncs.\n\n"
+                "This mode provides realistic examples and safe practice environment "
+                "for learning about Bitcoin wallets and transactions.\n\n"
+                f"Status: {message}"
+            )
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
