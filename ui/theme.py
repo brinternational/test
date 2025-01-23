@@ -5,11 +5,13 @@ def setup_theme(root):
     """Setup dark theme for the Bitcoin educational application."""
 
     # Define colors - Updated for better contrast
-    DARK_BG = "#1E1E1E"  # Dark background
-    DARKER_BG = "#252526"  # Slightly lighter than background
-    ACCENT = "#569CD6"    # Soft blue accent
-    TEXT = "#FFFFFF"      # White text for better contrast
-    SECONDARY_TEXT = "#CCCCCC"  # Light grey for secondary text
+    DARK_BG = "#1E1E1E"      # Dark background
+    DARKER_BG = "#252526"    # Slightly darker for contrast
+    ACCENT = "#61AFEF"       # Bright blue accent
+    TEXT = "#FFFFFF"         # Pure white text
+    ERROR_RED = "#FF3333"    # Bright red for errors
+    SUCCESS_GREEN = "#4CAF50" # Bright green for success
+    WARNING_YELLOW = "#FFC107" # Bright yellow for warnings
 
     # Configure root window
     root.configure(bg=DARK_BG)
@@ -32,30 +34,32 @@ def setup_theme(root):
 
     style.configure(
         "Title.TLabel",
-        font=("Segoe UI", 20, "bold"),
+        font=("Segoe UI", 24, "bold"),
         foreground=ACCENT
     )
 
     style.configure(
         "Topic.TLabel",
-        font=("Segoe UI", 12, "bold"),
+        font=("Segoe UI", 14, "bold"),
         foreground=TEXT
     )
 
+    # Button styling with better contrast
     style.configure(
         "TButton",
-        background=DARKER_BG,
+        background=ACCENT,
         foreground=TEXT,
-        padding=(10, 5),
-        font=("Segoe UI", 10)
+        padding=(15, 8),
+        font=("Segoe UI", 10, "bold")
     )
 
     style.map(
         "TButton",
-        background=[("active", ACCENT)],
+        background=[("active", ACCENT), ("pressed", "#4B8BBF")],
         foreground=[("active", "#FFFFFF")]
     )
 
+    # Notebook styling
     style.configure(
         "TNotebook",
         background=DARK_BG,
@@ -66,8 +70,8 @@ def setup_theme(root):
         "TNotebook.Tab",
         background=DARKER_BG,
         foreground=TEXT,
-        padding=[15, 5],
-        font=("Segoe UI", 10)
+        padding=[20, 8],
+        font=("Segoe UI", 11)
     )
 
     style.map(
@@ -79,12 +83,18 @@ def setup_theme(root):
     # Configure text widget colors
     root.option_add("*Text.background", DARKER_BG)
     root.option_add("*Text.foreground", TEXT)
-    root.option_add("*Text.font", ("Consolas", 10))
+    root.option_add("*Text.font", ("Consolas", 11))
 
-    # Entry widget configuration
+    # Entry widget with better contrast
     style.configure(
         "TEntry",
         fieldbackground=DARKER_BG,
         foreground=TEXT,
-        padding=5
+        padding=8,
+        font=("Segoe UI", 11)
     )
+
+    # Status message colors
+    root.option_add("*success.foreground", SUCCESS_GREEN)
+    root.option_add("*error.foreground", ERROR_RED)
+    root.option_add("*warning.foreground", WARNING_YELLOW)
