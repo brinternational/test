@@ -2,19 +2,19 @@ import tkinter as tk
 from tkinter import ttk
 
 def setup_theme(root):
-    """Setup dark theme for the Bitcoin educational application."""
+    """Setup light theme for the Bitcoin educational application."""
 
-    # Define colors - Updated for better contrast
-    DARK_BG = "#1E1E1E"      # Dark background
-    DARKER_BG = "#252526"    # Slightly darker for contrast
-    ACCENT = "#61AFEF"       # Bright blue accent
-    TEXT = "#FFFFFF"         # Pure white text
-    ERROR_RED = "#FF3333"    # Bright red for errors
-    SUCCESS_GREEN = "#4CAF50" # Bright green for success
-    WARNING_YELLOW = "#FFC107" # Bright yellow for warnings
+    # Define colors - Updated for better readability
+    GREY_BG = "#E0E0E0"      # Light grey background
+    DARKER_GREY = "#C0C0C0"  # Slightly darker for contrast
+    ACCENT = "#2196F3"       # Blue accent
+    TEXT = "#000000"         # Black text
+    ERROR_RED = "#D32F2F"    # Dark red for errors
+    SUCCESS_GREEN = "#388E3C" # Dark green for success
+    WARNING_YELLOW = "#F57F17" # Dark yellow for warnings
 
     # Configure root window
-    root.configure(bg=DARK_BG)
+    root.configure(bg=GREY_BG)
 
     # Configure styles
     style = ttk.Style(root)
@@ -22,12 +22,12 @@ def setup_theme(root):
     # Configure main theme
     style.configure(
         "TFrame",
-        background=DARK_BG
+        background=GREY_BG
     )
 
     style.configure(
         "TLabel",
-        background=DARK_BG,
+        background=GREY_BG,
         foreground=TEXT,
         font=("Segoe UI", 10)
     )
@@ -35,40 +35,42 @@ def setup_theme(root):
     style.configure(
         "Title.TLabel",
         font=("Segoe UI", 24, "bold"),
-        foreground=ACCENT
+        foreground=ACCENT,
+        background=GREY_BG
     )
 
     style.configure(
         "Topic.TLabel",
         font=("Segoe UI", 14, "bold"),
-        foreground=TEXT
+        foreground=TEXT,
+        background=GREY_BG
     )
 
     # Button styling with better contrast
     style.configure(
         "TButton",
         background=ACCENT,
-        foreground=TEXT,
+        foreground="#FFFFFF",
         padding=(15, 8),
         font=("Segoe UI", 10, "bold")
     )
 
     style.map(
         "TButton",
-        background=[("active", ACCENT), ("pressed", "#4B8BBF")],
+        background=[("active", ACCENT), ("pressed", "#1976D2")],
         foreground=[("active", "#FFFFFF")]
     )
 
     # Notebook styling
     style.configure(
         "TNotebook",
-        background=DARK_BG,
+        background=GREY_BG,
         tabmargins=[2, 5, 2, 0]
     )
 
     style.configure(
         "TNotebook.Tab",
-        background=DARKER_BG,
+        background=DARKER_GREY,
         foreground=TEXT,
         padding=[20, 8],
         font=("Segoe UI", 11)
@@ -81,14 +83,14 @@ def setup_theme(root):
     )
 
     # Configure text widget colors
-    root.option_add("*Text.background", DARKER_BG)
+    root.option_add("*Text.background", "#FFFFFF")
     root.option_add("*Text.foreground", TEXT)
     root.option_add("*Text.font", ("Consolas", 11))
 
     # Entry widget with better contrast
     style.configure(
         "TEntry",
-        fieldbackground=DARKER_BG,
+        fieldbackground="#FFFFFF",
         foreground=TEXT,
         padding=8,
         font=("Segoe UI", 11)
