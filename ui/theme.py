@@ -4,12 +4,12 @@ from tkinter import ttk
 def setup_theme(root):
     """Setup dark theme for the Bitcoin educational application."""
 
-    # Define colors
-    DARK_BG = "#1E1E1E"
-    DARKER_BG = "#252526"
-    ACCENT = "#569CD6"  # Soft blue accent
-    TEXT = "#D4D4D4"
-    SECONDARY_TEXT = "#808080"
+    # Define colors - Updated for better contrast
+    DARK_BG = "#1E1E1E"  # Dark background
+    DARKER_BG = "#252526"  # Slightly lighter than background
+    ACCENT = "#569CD6"    # Soft blue accent
+    TEXT = "#FFFFFF"      # White text for better contrast
+    SECONDARY_TEXT = "#CCCCCC"  # Light grey for secondary text
 
     # Configure root window
     root.configure(bg=DARK_BG)
@@ -53,7 +53,7 @@ def setup_theme(root):
     style.map(
         "TButton",
         background=[("active", ACCENT)],
-        foreground=[("active", DARK_BG)]
+        foreground=[("active", "#FFFFFF")]
     )
 
     style.configure(
@@ -73,7 +73,7 @@ def setup_theme(root):
     style.map(
         "TNotebook.Tab",
         background=[("selected", ACCENT)],
-        foreground=[("selected", DARK_BG)]
+        foreground=[("selected", "#FFFFFF")]
     )
 
     # Configure text widget colors

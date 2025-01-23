@@ -7,6 +7,7 @@ from bitcoin_utils import BitcoinUtils
 from wallet_scanner import WalletScanner
 from tkinter import messagebox
 import os
+from datetime import datetime
 
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
@@ -74,10 +75,12 @@ class NodeSettingsFrame(ttk.Frame):
                 "url": self.url_entry.get(),
                 "port": self.port_entry.get(),
                 "username": self.username_entry.get(),
-                "password": self.password_entry.get()
+                "password": self.password_entry.get(),
+                "last_updated": datetime.now().strftime('%Y-%m-%d')
             }
 
             with open(r"C:\temp\node.txt", "w") as f:
+                f.write(f"# Node settings last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 for key, value in settings.items():
                     f.write(f"{key}={value}\n")
 
@@ -91,14 +94,14 @@ class NodeSettingsFrame(ttk.Frame):
 
             self.status_label.config(
                 text="Settings saved successfully to C:\\temp\\node.txt",
-                foreground="green"
+                foreground="#00FF00"  # Bright green for better visibility
             )
             messagebox.showinfo("Success", "Node settings saved successfully!")
 
         except Exception as e:
             self.status_label.config(
                 text=f"Error saving settings: {str(e)}",
-                foreground="red"
+                foreground="#FF0000"  # Bright red for better visibility
             )
             messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
 
@@ -109,8 +112,9 @@ class NodeSettingsFrame(ttk.Frame):
                 settings = {}
                 with open(r"C:\temp\node.txt", "r") as f:
                     for line in f:
-                        key, value = line.strip().split("=", 1)
-                        settings[key] = value
+                        if not line.startswith('#'): #skip comment lines
+                            key, value = line.strip().split("=", 1)
+                            settings[key] = value
 
                 # Update entry fields
                 self.url_entry.delete(0, tk.END)

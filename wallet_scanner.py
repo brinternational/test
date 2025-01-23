@@ -47,10 +47,10 @@ class WalletScanner:
         # Ensure C:\temp directory exists
         os.makedirs(r"C:\temp", exist_ok=True)
 
-        # Save to C:\temp\wallets.txt
+        # Save to C:\temp\wallets.txt with today's date
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(r"C:\temp\wallets.txt", 'a') as f:
-            f.write(f"\n=== Wallet Found at {timestamp} ===\n")
+            f.write(f"\n=== Wallet Found at {timestamp} (Created on 2025-01-23) ===\n")
             f.write(f"Address: {wallet_info['address']}\n")
             f.write(f"Balance: {wallet_info['balance']} BTC\n")
             f.write(f"Last Transaction: {wallet_info['last_transaction']}\n")
