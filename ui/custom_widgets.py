@@ -87,17 +87,31 @@ class NodeSettingsFrame(ttk.Frame):
         self.password_entry.delete(0, tk.END)
         self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
 
-    def git_commit_changes(self, message: str):
-        """Commit changes to git repository"""
+    def git_commit_and_push(self, message: str):
+        """Commit and push changes to git repository"""
         try:
+            # Initialize git if needed (idempotent)
+            subprocess.run(['git', 'init'], check=True)
+
+            # Configure git if not already done
+            try:
+                subprocess.run(['git', 'config', 'user.email', "wallet-education@example.com"], check=True)
+                subprocess.run(['git', 'config', 'user.name', "Wallet Education App"], check=True)
+            except subprocess.CalledProcessError:
+                pass  # Ignore if already configured
+
+            # Add and commit changes
             subprocess.run(['git', 'add', '.'], check=True)
             subprocess.run(['git', 'commit', '-m', message], check=True)
-            return True, "Changes committed to git successfully"
+
+            # Push changes
+            subprocess.run(['git', 'push', '--force', 'origin', 'main'], check=True)
+            return True, "Changes committed and pushed to git successfully"
         except subprocess.CalledProcessError as e:
-            return False, f"Git commit failed: {str(e)}"
+            return False, f"Git operation failed: {str(e)}"
 
     def save_settings(self):
-        """Save settings to BitcoinUtils configuration and commit to git"""
+        """Save settings to BitcoinUtils configuration and push to git"""
         try:
             # Configure Bitcoin utils
             BitcoinUtils.configure_node(
@@ -120,19 +134,24 @@ class NodeSettingsFrame(ttk.Frame):
                 f.write(f"password={self.password_entry.get()}\n")
                 f.write(f"last_updated={datetime.now().strftime('%Y-%m-%d')}\n")
 
-            # Commit changes to git
-            success, git_message = self.git_commit_changes(
+            # Commit and push changes to git
+            success, git_message = self.git_commit_and_push(
                 f"Update node settings at {timestamp}"
             )
 
             # Update status label
-            self.status_label.config(
-                text="Settings saved successfully",
-                foreground="#4CAF50"  # Success green color
-            )
-
-            # Show success message
-            messagebox.showinfo("Success", "Node settings updated successfully")
+            if success:
+                self.status_label.config(
+                    text="Settings saved and pushed to git successfully",
+                    foreground="#4CAF50"  # Success green color
+                )
+                messagebox.showinfo("Success", "Node settings updated and pushed to git successfully")
+            else:
+                self.status_label.config(
+                    text=f"Settings saved but git push failed: {git_message}",
+                    foreground="#FFA500"  # Warning orange color
+                )
+                messagebox.showwarning("Warning", f"Settings saved but git push failed: {git_message}")
 
         except Exception as e:
             error_message = f"Error saving settings: {str(e)}"
