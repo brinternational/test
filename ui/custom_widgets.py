@@ -13,8 +13,7 @@ import subprocess
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.config_dir = "config"
-        self.config_file = os.path.join(self.config_dir, "node_settings.txt")
+        self.config_file = r"C:\temp\node_settings.txt"
         self.setup_ui()
         self.load_default_settings()
 
@@ -83,60 +82,64 @@ class NodeSettingsFrame(ttk.Frame):
 
         self.status_label = ttk.Label(
             self.status_frame,
-            text="Not connected",
-            style="Topic.TLabel",
-            foreground="#D32F2F"  # Error red color
+            text="Settings saved in memory",
+            style="Topic.TLabel"
         )
         self.status_label.pack()
 
-        # Detailed status
-        self.detail_label = ttk.Label(
-            self.status_frame,
-            text="Click 'Test Connection' to verify node settings",
-            wraplength=400
-        )
-        self.detail_label.pack(pady=5)
-
     def load_default_settings(self):
-        """Load default settings from BitcoinUtils"""
-        self.url_entry.delete(0, tk.END)
-        self.url_entry.insert(0, BitcoinUtils.NODE_URL)
-
-        self.port_entry.delete(0, tk.END)
-        self.port_entry.insert(0, BitcoinUtils.NODE_PORT)
-
-        self.username_entry.delete(0, tk.END)
-        self.username_entry.insert(0, BitcoinUtils.RPC_USER)
-
-        self.password_entry.delete(0, tk.END)
-        self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
-
-    def git_commit_and_push(self, message: str):
-        """Commit and push changes to git repository"""
+        """Load settings from C:\temp\node_settings.txt if it exists, otherwise use defaults"""
         try:
-            # Initialize git if needed (idempotent)
-            subprocess.run(['git', 'init'], check=True)
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    settings = {}
+                    for line in f:
+                        if line.startswith('#') or '=' not in line:
+                            continue
+                        key, value = line.strip().split('=', 1)
+                        settings[key] = value
 
-            # Configure git if not already done
-            try:
-                subprocess.run(['git', 'config', 'user.email', "wallet-education@example.com"], check=True)
-                subprocess.run(['git', 'config', 'user.name', "Wallet Education App"], check=True)
-            except subprocess.CalledProcessError:
-                pass  # Ignore if already configured
+                self.url_entry.delete(0, tk.END)
+                self.url_entry.insert(0, settings.get('url', BitcoinUtils.NODE_URL))
 
-            # Add and commit changes
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
+                self.port_entry.delete(0, tk.END)
+                self.port_entry.insert(0, settings.get('port', BitcoinUtils.NODE_PORT))
 
-            # Push changes
-            subprocess.run(['git', 'push', '--force', 'origin', 'main'], check=True)
-            return True, "Changes committed and pushed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git operation failed: {str(e)}"
+                self.username_entry.delete(0, tk.END)
+                self.username_entry.insert(0, settings.get('username', BitcoinUtils.RPC_USER))
+
+                self.password_entry.delete(0, tk.END)
+                self.password_entry.insert(0, settings.get('password', BitcoinUtils.RPC_PASS))
+
+                # Update BitcoinUtils with loaded settings
+                BitcoinUtils.configure_node(
+                    settings.get('url', BitcoinUtils.NODE_URL),
+                    settings.get('port', BitcoinUtils.NODE_PORT),
+                    settings.get('username', BitcoinUtils.RPC_USER),
+                    settings.get('password', BitcoinUtils.RPC_PASS)
+                )
+            else:
+                # Load default settings from BitcoinUtils
+                self.url_entry.delete(0, tk.END)
+                self.url_entry.insert(0, BitcoinUtils.NODE_URL)
+
+                self.port_entry.delete(0, tk.END)
+                self.port_entry.insert(0, BitcoinUtils.NODE_PORT)
+
+                self.username_entry.delete(0, tk.END)
+                self.username_entry.insert(0, BitcoinUtils.RPC_USER)
+
+                self.password_entry.delete(0, tk.END)
+                self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load settings: {str(e)}")
 
     def save_settings(self):
-        """Save settings to BitcoinUtils configuration and push to git"""
+        """Save settings to C:\temp\node_settings.txt"""
         try:
+            # Create C:\temp directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+
             # Configure Bitcoin utils
             BitcoinUtils.configure_node(
                 self.url_entry.get(),
@@ -144,9 +147,6 @@ class NodeSettingsFrame(ttk.Frame):
                 self.username_entry.get(),
                 self.password_entry.get()
             )
-
-            # Ensure config directory exists
-            os.makedirs(self.config_dir, exist_ok=True)
 
             # Save settings to file
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -158,24 +158,11 @@ class NodeSettingsFrame(ttk.Frame):
                 f.write(f"password={self.password_entry.get()}\n")
                 f.write(f"last_updated={datetime.now().strftime('%Y-%m-%d')}\n")
 
-            # Commit and push changes to git
-            success, git_message = self.git_commit_and_push(
-                f"Update node settings at {timestamp}"
+            self.status_label.config(
+                text="Settings saved successfully",
+                foreground="#388E3C"  # Success green color
             )
-
-            # Update status label
-            if success:
-                self.status_label.config(
-                    text="Settings saved and pushed to git successfully",
-                    foreground="#388E3C"  # Success green color
-                )
-                messagebox.showinfo("Success", "Node settings updated and pushed to git successfully")
-            else:
-                self.status_label.config(
-                    text=f"Settings saved but git push failed: {git_message}",
-                    foreground="#FFA500"  # Warning orange color
-                )
-                messagebox.showwarning("Warning", f"Settings saved but git push failed: {git_message}")
+            messagebox.showinfo("Success", "Node settings saved successfully")
 
         except Exception as e:
             error_message = f"Error saving settings: {str(e)}"
@@ -188,24 +175,22 @@ class NodeSettingsFrame(ttk.Frame):
     def test_connection(self):
         """Test connection to Bitcoin node and update status."""
         self.status_label.config(text="Testing connection...")
-        self.detail_label.config(text="Please wait...")
         self.update()  # Force UI update
 
         success, message = BitcoinUtils.test_node_connection()
 
         if success:
             self.status_label.config(
-                text="Connected",
+                text="Connected successfully",
                 foreground="#388E3C"  # Success green
             )
         else:
             self.status_label.config(
-                text="Not Connected",
+                text="Connection failed",
                 foreground="#D32F2F"  # Error red
             )
 
-        self.detail_label.config(text=message)
-
+        messagebox.showinfo("Connection Test", message)
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):
