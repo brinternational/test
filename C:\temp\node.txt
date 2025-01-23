@@ -1,0 +1,6 @@
+# Node settings last updated: 2025-01-23 16:12:54
+url=localhost
+port=8332
+username=
+password=
+last_updated=2025-01-23

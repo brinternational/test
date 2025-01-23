@@ -8,6 +8,7 @@ from wallet_scanner import WalletScanner
 from tkinter import messagebox
 import os
 from datetime import datetime
+import subprocess
 
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
@@ -66,6 +67,15 @@ class NodeSettingsFrame(ttk.Frame):
         )
         self.status_label.grid(row=5, column=0, columnspan=2, pady=10)
 
+    def git_commit_changes(self, message: str):
+        """Commit changes to git repository"""
+        try:
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', message], check=True)
+            return True, "Changes committed to git successfully"
+        except subprocess.CalledProcessError as e:
+            return False, f"Git commit failed: {str(e)}"
+
     def save_settings(self):
         """Save node settings to C:\temp\node.txt"""
         try:
@@ -92,11 +102,23 @@ class NodeSettingsFrame(ttk.Frame):
                 settings["password"]
             )
 
+            # Commit changes to git
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            success, git_message = self.git_commit_changes(
+                f"Update node settings at {timestamp}"
+            )
+
+            status_message = "Settings saved successfully to C:\\temp\\node.txt"
+            if success:
+                status_message += "\nChanges committed to git"
+            else:
+                status_message += f"\nGit commit failed: {git_message}"
+
             self.status_label.config(
-                text="Settings saved successfully to C:\\temp\\node.txt",
+                text=status_message,
                 foreground="#00FF00"  # Bright green for better visibility
             )
-            messagebox.showinfo("Success", "Node settings saved successfully!")
+            messagebox.showinfo("Success", status_message)
 
         except Exception as e:
             self.status_label.config(
@@ -132,7 +154,7 @@ class NodeSettingsFrame(ttk.Frame):
         except Exception as e:
             self.status_label.config(
                 text=f"Error loading settings: {str(e)}",
-                foreground="red"
+                foreground="#FF0000"  # Bright red for better visibility
             )
 
 class EducationalFrame(ttk.Frame):
