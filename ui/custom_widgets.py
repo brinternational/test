@@ -8,51 +8,51 @@ from wallet_scanner import WalletScanner
 from tkinter import messagebox
 import os
 from datetime import datetime
-import subprocess
 
 class NodeSettingsFrame(ttk.Frame):
-    settings_file = r"C:\temp\node.txt"  # Class-level attribute with full path
-
     def __init__(self, parent):
-        self.settings_file = NodeSettingsFrame.settings_file  # Instance attribute
         super().__init__(parent)
         self.setup_ui()
-        self.load_settings()
+        self.load_default_settings()
 
     def setup_ui(self):
+        # Use grid for the main frame
+        self.grid_columnconfigure(0, weight=1)
+
         # Title
         title = ttk.Label(
             self,
             text="Bitcoin Node Settings",
             style="Title.TLabel"
         )
-        title.pack(pady=20)
+        title.grid(row=0, column=0, pady=20)
 
         # Settings form
         form = ttk.Frame(self)
-        form.pack(fill=tk.X, padx=20, pady=10)
+        form.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
+
+        # Configure form grid
+        form.grid_columnconfigure(1, weight=1)
 
         # Node URL
-        ttk.Label(form, text="Node URL:").grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(form, text="Node URL:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
         self.url_entry = ttk.Entry(form, width=40)
-        self.url_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.url_entry.insert(0, "localhost")
+        self.url_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
         # Node Port
-        ttk.Label(form, text="Port:").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Label(form, text="Port:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
         self.port_entry = ttk.Entry(form, width=40)
-        self.port_entry.grid(row=1, column=1, padx=5, pady=5)
-        self.port_entry.insert(0, "8332")
+        self.port_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
         # RPC Username
-        ttk.Label(form, text="RPC Username:").grid(row=2, column=0, padx=5, pady=5)
+        ttk.Label(form, text="RPC Username:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.username_entry = ttk.Entry(form, width=40)
-        self.username_entry.grid(row=2, column=1, padx=5, pady=5)
+        self.username_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
 
         # RPC Password
-        ttk.Label(form, text="RPC Password:").grid(row=3, column=0, padx=5, pady=5)
+        ttk.Label(form, text="RPC Password:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
         self.password_entry = ttk.Entry(form, width=40, show="*")
-        self.password_entry.grid(row=3, column=1, padx=5, pady=5)
+        self.password_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
 
         # Save button
         save_btn = ttk.Button(
@@ -65,54 +65,40 @@ class NodeSettingsFrame(ttk.Frame):
         # Status message
         self.status_label = ttk.Label(
             form,
-            text=f"Settings will be saved to: {self.settings_file}",
+            text="Settings saved in memory",
             style="Topic.TLabel"
         )
         self.status_label.grid(row=5, column=0, columnspan=2, pady=10)
 
-    def git_commit_changes(self, message: str):
-        """Commit changes to git repository"""
-        try:
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
-            return True, "Changes committed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git commit failed: {str(e)}"
+    def load_default_settings(self):
+        """Load default settings from BitcoinUtils"""
+        self.url_entry.delete(0, tk.END)
+        self.url_entry.insert(0, BitcoinUtils.NODE_URL)
+
+        self.port_entry.delete(0, tk.END)
+        self.port_entry.insert(0, BitcoinUtils.NODE_PORT)
+
+        self.username_entry.delete(0, tk.END)
+        self.username_entry.insert(0, BitcoinUtils.RPC_USER)
+
+        self.password_entry.delete(0, tk.END)
+        self.password_entry.insert(0, BitcoinUtils.RPC_PASS)
 
     def save_settings(self):
-        """Save node settings to C:\temp directory"""
+        """Save settings to BitcoinUtils configuration"""
         try:
-            # Create C:\temp directory if it doesn't exist
-            os.makedirs(r"C:\temp", exist_ok=True)
-
-            settings = {
-                "url": self.url_entry.get(),
-                "port": self.port_entry.get(),
-                "username": self.username_entry.get(),
-                "password": self.password_entry.get(),
-                "last_updated": datetime.now().strftime('%Y-%m-%d')
-            }
-
-            with open(self.settings_file, "w") as f:
-                f.write(f"# Node settings last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                for key, value in settings.items():
-                    f.write(f"{key}={value}\n")
-
-            # Update Bitcoin Utils with new settings
             BitcoinUtils.configure_node(
-                settings["url"],
-                settings["port"],
-                settings["username"],
-                settings["password"]
+                self.url_entry.get(),
+                self.port_entry.get(),
+                self.username_entry.get(),
+                self.password_entry.get()
             )
-
-            status_message = f"Settings saved successfully to {self.settings_file}"
 
             self.status_label.config(
-                text=status_message,
+                text="Settings saved successfully",
                 foreground="#4CAF50"  # Success green color
             )
-            messagebox.showinfo("Success", status_message)
+            messagebox.showinfo("Success", "Node settings updated successfully")
 
         except Exception as e:
             error_message = f"Error saving settings: {str(e)}"
@@ -121,37 +107,6 @@ class NodeSettingsFrame(ttk.Frame):
                 foreground="#FF3333"  # Error red color
             )
             messagebox.showerror("Error", error_message)
-
-    def load_settings(self):
-        """Load existing settings if available"""
-        try:
-            if os.path.exists(self.settings_file):
-                settings = {}
-                with open(self.settings_file, "r") as f:
-                    for line in f:
-                        if not line.startswith('#'):  # skip comment lines
-                            key, value = line.strip().split("=", 1)
-                            settings[key] = value
-
-                # Update entry fields
-                self.url_entry.delete(0, tk.END)
-                self.url_entry.insert(0, settings.get("url", "localhost"))
-
-                self.port_entry.delete(0, tk.END)
-                self.port_entry.insert(0, settings.get("port", "8332"))
-
-                self.username_entry.delete(0, tk.END)
-                self.username_entry.insert(0, settings.get("username", ""))
-
-                self.password_entry.delete(0, tk.END)
-                self.password_entry.insert(0, settings.get("password", ""))
-
-        except Exception as e:
-            self.status_label.config(
-                text=f"Error loading settings: {str(e)}",
-                foreground="#FF3333"  # Error red color
-            )
-
 
 class EducationalFrame(ttk.Frame):
     def __init__(self, parent):
@@ -172,12 +127,12 @@ class EducationalFrame(ttk.Frame):
         content.pack(fill=tk.BOTH, expand=True, padx=20)
 
         topics = [
-            ("What is a Bitcoin Wallet?", 
+            ("What is a Bitcoin Wallet?",
              "A Bitcoin wallet is a software program that stores private and public keys "
              "and interacts with the Bitcoin blockchain to enable users to send and "
              "receive digital currency and monitor their balance."),
 
-            ("Seed Phrases", 
+            ("Seed Phrases",
              "A seed phrase is a list of words that can be used to recreate your Bitcoin "
              "wallet. It's crucial to keep this safe and private."),
 

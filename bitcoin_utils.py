@@ -7,11 +7,11 @@ import random
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
-    # Default testnet node settings (can be overridden via environment variables)
-    NODE_URL = os.getenv('BITCOIN_NODE_URL', 'localhost')
-    NODE_PORT = os.getenv('BITCOIN_NODE_PORT', '8332')
-    RPC_USER = os.getenv('BITCOIN_RPC_USER', '')
-    RPC_PASS = os.getenv('BITCOIN_RPC_PASS', '')
+    # Default testnet node settings
+    NODE_URL = 'localhost'
+    NODE_PORT = '8332'
+    RPC_USER = 'your_rpc_username'
+    RPC_PASS = 'your_rpc_password'
     _rpc_connection = None
 
     # Mock data for educational purposes
@@ -19,46 +19,47 @@ class BitcoinUtils:
     MOCK_BLOCKCHAIN_HEIGHT = 800000
     MOCK_NETWORK = "testnet"
 
-    @staticmethod
-    def configure_node(node_url: str, port: str, rpc_user: str, rpc_pass: str):
+    @classmethod
+    def configure_node(cls, node_url: str, port: str, rpc_user: str, rpc_pass: str):
         """Configure Bitcoin node connection settings."""
-        BitcoinUtils.NODE_URL = node_url
-        BitcoinUtils.NODE_PORT = port
-        BitcoinUtils.RPC_USER = rpc_user
-        BitcoinUtils.RPC_PASS = rpc_pass
-        BitcoinUtils._rpc_connection = None  # Reset connection to use new settings
+        cls.NODE_URL = node_url
+        cls.NODE_PORT = port
+        cls.RPC_USER = rpc_user
+        cls.RPC_PASS = rpc_pass
+        cls._rpc_connection = None  # Reset connection to use new settings
+        print(f"Node configured: {node_url}:{port}")
 
-    @staticmethod
-    def get_rpc_connection() -> AuthServiceProxy:
+    @classmethod
+    def get_rpc_connection(cls) -> AuthServiceProxy:
         """Get or create RPC connection to Bitcoin node."""
-        if BitcoinUtils._rpc_connection is None:
-            if not all([BitcoinUtils.RPC_USER, BitcoinUtils.RPC_PASS]):
+        if cls._rpc_connection is None:
+            if not all([cls.RPC_USER, cls.RPC_PASS]):
                 raise ValueError("Bitcoin node credentials not configured.")
 
-            rpc_url = f"http://{BitcoinUtils.RPC_USER}:{BitcoinUtils.RPC_PASS}@{BitcoinUtils.NODE_URL}:{BitcoinUtils.NODE_PORT}"
-            BitcoinUtils._rpc_connection = AuthServiceProxy(rpc_url)
+            rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
+            cls._rpc_connection = AuthServiceProxy(rpc_url)
 
-        return BitcoinUtils._rpc_connection
+        return cls._rpc_connection
 
-    @staticmethod
-    def test_node_connection() -> Tuple[bool, str]:
+    @classmethod
+    def test_node_connection(cls) -> Tuple[bool, str]:
         """Test connection to Bitcoin node, fallback to mock mode if connection fails."""
         try:
-            rpc = BitcoinUtils.get_rpc_connection()
+            rpc = cls.get_rpc_connection()
             blockchain_info = rpc.getblockchaininfo()
-            BitcoinUtils.MOCK_MODE = False
+            cls.MOCK_MODE = False
             return True, f"Connected to node. Chain: {blockchain_info['chain']}, Blocks: {blockchain_info['blocks']}"
         except Exception as e:
-            BitcoinUtils.MOCK_MODE = True
+            cls.MOCK_MODE = True
             return False, (
                 f"Using educational simulation mode.\n"
-                f"Mock Chain: {BitcoinUtils.MOCK_NETWORK}\n"
-                f"Mock Blocks: {BitcoinUtils.MOCK_BLOCKCHAIN_HEIGHT}\n"
+                f"Mock Chain: {cls.MOCK_NETWORK}\n"
+                f"Mock Blocks: {cls.MOCK_BLOCKCHAIN_HEIGHT}\n"
                 f"(Original error: {str(e)})"
             )
 
-    @staticmethod
-    def derive_addresses(seed: bytes, path: str = "m/44'/0'/0'/0/0") -> Dict[str, str]:
+    @classmethod
+    def derive_addresses(cls, seed: bytes, path: str = "m/44'/0'/0'/0/0") -> Dict[str, str]:
         """
         Derive Bitcoin addresses from seed (mock implementation for educational purposes).
         In real implementation, this would use proper BIP32/44/84 derivation.
@@ -89,17 +90,17 @@ class BitcoinUtils:
             "balance": balance
         }
 
-    @staticmethod
-    def check_balance(address: str) -> Optional[float]:
+    @classmethod
+    def check_balance(cls, address: str) -> Optional[float]:
         """Check balance of a Bitcoin address."""
-        if not BitcoinUtils.MOCK_MODE:
+        if not cls.MOCK_MODE:
             try:
-                rpc = BitcoinUtils.get_rpc_connection()
+                rpc = cls.get_rpc_connection()
                 balance = rpc.getreceivedbyaddress(address)
                 return float(balance)
             except Exception as e:
                 print(f"Node error, falling back to mock mode: {str(e)}")
-                BitcoinUtils.MOCK_MODE = True
+                cls.MOCK_MODE = True
 
         # Mock balance for educational purposes
         # Generate consistent mock balance based on address
@@ -107,16 +108,16 @@ class BitcoinUtils:
         mock_balance = (address_hash % 1000) / 100 if address_hash % 100 == 0 else 0
         return mock_balance
 
-    @staticmethod
-    def validate_address(address: str) -> bool:
+    @classmethod
+    def validate_address(cls, address: str) -> bool:
         """Validate Bitcoin address format."""
-        if not BitcoinUtils.MOCK_MODE:
+        if not cls.MOCK_MODE:
             try:
-                rpc = BitcoinUtils.get_rpc_connection()
+                rpc = cls.get_rpc_connection()
                 result = rpc.validateaddress(address)
                 return result.get('isvalid', False)
             except:
-                BitcoinUtils.MOCK_MODE = True
+                cls.MOCK_MODE = True
 
         # Basic format checking for educational purposes
         if not address:
