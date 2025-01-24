@@ -103,13 +103,15 @@ class WalletScanner:
                     self._futures = []
 
                 # Create new executor with current thread count
-                self._executor = ThreadPoolExecutor(max_workers=self.thread_count)
+                total_workers = self.thread_count  # Include generator thread in total
+                self._executor = ThreadPoolExecutor(max_workers=total_workers)
+                self._futures = []
 
-                # Start wallet generator thread
+                # Start wallet generator thread (counts as one worker)
                 self._futures.append(self._executor.submit(self._wallet_generator_worker))
 
-                # Start scanning threads (one less than total since generator takes one)
-                for _ in range(max(1, self.thread_count - 1)):
+                # Start scanning threads with remaining workers
+                for _ in range(total_workers - 1):  # -1 for generator thread
                     self._futures.append(self._executor.submit(self._scan_worker))
 
     def stop_scan(self):
@@ -128,11 +130,14 @@ class WalletScanner:
             elapsed_time = time.time() - (self.start_time or time.time())
             scan_rate = self.total_scanned / (elapsed_time / 60) if elapsed_time > 0 else 0
 
+            # Count only active threads, subtracting completed/failed futures
+            active_threads = sum(1 for f in self._futures if not f.done())
+
             return {
                 'total_scanned': self.total_scanned,
                 'wallets_with_balance': len(self.wallets_with_balance),
                 'scan_rate': round(scan_rate, 2),
-                'active_threads': len(self._futures) if self._futures else 0,
+                'active_threads': active_threads,  # Now accurately counts active threads
                 'queue_size': self.wallet_queue.qsize()
             }
 
@@ -153,10 +158,10 @@ class WalletScanner:
         """Save wallet with balance to file."""
         try:
             # Create C:\temp directory if it doesn't exist
-            save_dir = r"C:\temp"
+            save_dir = r"C:\test\temp"  # Changed to match the path shown in UI
             os.makedirs(save_dir, exist_ok=True)
 
-            # Save to C:\temp\wallets.txt
+            # Save to wallets.txt
             filepath = os.path.join(save_dir, "wallets.txt")
 
             with open(filepath, 'a') as f:
