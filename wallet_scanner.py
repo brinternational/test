@@ -7,8 +7,16 @@ import threading
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from wallet_generator import WalletGenerator
-import subprocess
+from wallet_generator import WalletGenerator #Potentially needs to be replaced with BitcoinUtils
+#import subprocess # Removed as git functionality is not included in edited code
+
+# Placeholder for BitcoinUtils - Replace with actual implementation
+class BitcoinUtils:
+    @staticmethod
+    def derive_addresses(seed):
+        #Replace with actual address derivation logic
+        return {'legacy_address': 'test_legacy', 'segwit_address': 'test_segwit', 'native_segwit': 'test_native', 'balance': random.randint(0,10)}
+
 
 class WalletScanner:
     def __init__(self):
@@ -22,33 +30,24 @@ class WalletScanner:
         self._lock = threading.Lock()
         self.wallet_queue = Queue(maxsize=1000)  # Buffer for generated wallets
 
-    def generate_wallet_data(self):
-        """Generate new wallet data using WalletGenerator."""
-        try:
-            # Generate random entropy for new seed phrase
-            word_count = 12  # Can be adjusted to 15, 18, 21, or 24
-            words, entropy = WalletGenerator.generate_seed_phrase(word_count)
-
-            # Derive addresses from the seed
-            seed = entropy  # In production, would apply BIP39 seed derivation
-            addresses = WalletGenerator.derive_addresses(seed)
-
-            return {
-                'seed_phrase': ' '.join(words),
-                'addresses': addresses
-            }
-        except Exception as e:
-            logging.error(f"Error generating wallet: {str(e)}")
-            return None
-
     def _wallet_generator_worker(self):
         """Continuously generate new wallets and add to queue."""
         while self.scanning:
             try:
                 if self.wallet_queue.qsize() < 1000:  # Keep queue filled
-                    wallet_data = self.generate_wallet_data()
-                    if wallet_data:
-                        self.wallet_queue.put(wallet_data)
+                    # Generate random entropy for new seed phrase
+                    word_count = 12  # Can be adjusted to 15, 18, 21, or 24
+                    words, entropy = WalletGenerator.generate_seed_phrase(word_count)
+
+                    # Derive addresses from seed
+                    addresses = BitcoinUtils.derive_addresses(entropy)
+
+                    wallet_data = {
+                        'seed_phrase': ' '.join(words),
+                        'addresses': addresses
+                    }
+
+                    self.wallet_queue.put(wallet_data)
                 else:
                     time.sleep(0.1)  # Prevent CPU thrashing when queue is full
             except Exception as e:
@@ -137,7 +136,7 @@ class WalletScanner:
         elapsed_minutes = (time.time() - self.start_time) / 60
         return self.total_scanned / elapsed_minutes if elapsed_minutes > 0 else 0
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self):
         """Get current scanning statistics."""
         with self._lock:
             elapsed_time = time.time() - (self.start_time or time.time())
@@ -150,6 +149,19 @@ class WalletScanner:
                 'active_threads': len(self._futures) if self._futures else 0,
                 'queue_size': self.wallet_queue.qsize()
             }
+
+    def set_thread_count(self, count: int):
+        """Set the number of scanning threads."""
+        if count < 1:
+            raise ValueError("Thread count must be at least 1")
+
+        with self._lock:
+            self.thread_count = count
+
+            # If scanning is active, restart with new thread count
+            if self.scanning:
+                self.stop_scan()
+                self.start_scan()
 
     def _save_to_file(self, wallet_info: Dict):
         """Save wallet with balance to file."""
@@ -172,39 +184,3 @@ class WalletScanner:
 
         except Exception as e:
             logging.error(f"Error saving wallet: {str(e)}")
-
-    def git_commit_and_push(self, message: str):
-        """Commit and push changes to git repository"""
-        try:
-            # Initialize git if needed (idempotent)
-            subprocess.run(['git', 'init'], check=True)
-
-            # Configure git if not already done
-            try:
-                subprocess.run(['git', 'config', 'user.email', "wallet-education@example.com"], check=True)
-                subprocess.run(['git', 'config', 'user.name', "Wallet Education App"], check=True)
-            except subprocess.CalledProcessError:
-                pass  # Ignore if already configured
-
-            # Add and commit changes
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
-
-            # Push changes
-            subprocess.run(['git', 'push', '--force', 'origin', 'main'], check=True)
-            return True, "Changes committed and pushed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git operation failed: {str(e)}"
-
-    def set_thread_count(self, count: int):
-        """Set the number of scanning threads."""
-        if count < 1:
-            raise ValueError("Thread count must be at least 1")
-
-        with self._lock:
-            self.thread_count = count
-
-            # If scanning is active, restart with new thread count
-            if self.scanning:
-                self.stop_scan()
-                self.start_scan()

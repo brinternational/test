@@ -232,7 +232,7 @@ class WalletFrame(ttk.Frame):
             width=3,
             command=self.update_thread_count
         )
-        self.thread_spinbox.set(1)
+        self.thread_spinbox.set(4)  # Default to 4 threads
         self.thread_spinbox.pack(side=tk.LEFT, padx=5)
 
         # Add educational mode indicator
@@ -243,27 +243,14 @@ class WalletFrame(ttk.Frame):
         )
         self.mode_label.pack(side=tk.RIGHT, padx=5)
 
-        generate_btn = ttk.Button(
-            controls,
-            text="Generate New Seed Phrase",
-            command=self.generate_seed
-        )
-        generate_btn.pack(side=tk.LEFT, padx=5)
-
+        # Start/Stop Scanning button
         self.scan_button = ttk.Button(
             controls,
             text="Start Scanning",
-            command=self.toggle_scanning
+            command=self.toggle_scanning,
+            style="Accent.TButton"  # Make it stand out
         )
         self.scan_button.pack(side=tk.LEFT, padx=5)
-
-        # Add Node Test Button
-        test_node_btn = ttk.Button(
-            controls,
-            text="Test Node Connection",
-            command=self.test_node_connection
-        )
-        test_node_btn.pack(side=tk.LEFT, padx=5)
 
         # Statistics Frame
         stats_frame = ttk.LabelFrame(self, text="Scanning Statistics")
@@ -279,79 +266,23 @@ class WalletFrame(ttk.Frame):
         self.progress.pack(fill=tk.X, padx=5, pady=5)
 
         # Statistics Labels
-        self.stats_text = tk.StringVar(value="Total Scanned: 0 | With Balance: 0 | Rate: 0 wallets/min")
+        self.stats_text = tk.StringVar(value="Click 'Start Scanning' to begin searching for wallets")
         stats_label = ttk.Label(
             stats_frame,
             textvariable=self.stats_text
         )
         stats_label.pack(pady=5)
 
-        # Display area
+        # Results area
         self.display = ttk.Frame(self)
         self.display.pack(fill=tk.BOTH, expand=True, padx=20)
 
-        self.seed_display = ttk.Label(
+        self.results_display = ttk.Label(
             self.display,
-            text="Click 'Generate' to create a new seed phrase",
+            text="Scanning results will appear here",
             wraplength=600
         )
-        self.seed_display.pack(pady=20)
-
-        self.address_display = ttk.Label(
-            self.display,
-            text="",
-            wraplength=600
-        )
-        self.address_display.pack(pady=10)
-
-        self.transaction_display = ttk.Label(
-            self.display,
-            text="",
-            wraplength=600,
-            style="Transaction.TLabel"
-        )
-        self.transaction_display.pack(pady=10)
-
-    def generate_seed(self):
-        """Generate new seed phrase and derive addresses"""
-        try:
-            # Generate new seed phrase
-            words, entropy = wallet_generator.WalletGenerator.generate_seed_phrase()
-            self.seed_display.config(
-                text="Generated Seed Phrase (BIP39):\n" + " ".join(words),
-                foreground="#388E3C"  # Success green
-            )
-
-            # Derive addresses from seed
-            addresses = BitcoinUtils.derive_addresses(entropy)
-
-            # Format address display
-            address_text = (
-                f"Derived Addresses:\n\n"
-                f"Legacy (P2PKH):\n{addresses['legacy_address']}\n\n"
-                f"SegWit (P2SH):\n{addresses['segwit_address']}\n\n"
-                f"Native SegWit (P2WPKH):\n{addresses['native_segwit']}\n\n"
-                f"Balance: {addresses['balance']:.8f} BTC\n"
-                f"Last Transaction: {addresses['last_transaction']}"
-            )
-
-            self.address_display.config(
-                text=address_text,
-                foreground="#000000"
-            )
-
-            # Add addresses to scanner if running
-            if self.wallet_scanner.scanning:
-                self.wallet_scanner.add_wallet(addresses)
-                self.update_statistics()
-
-        except Exception as e:
-            error_msg = f"Error generating wallet: {str(e)}"
-            self.seed_display.config(
-                text=error_msg,
-                foreground="#D32F2F"  # Error red
-            )
-            messagebox.showerror("Error", error_msg)
+        self.results_display.pack(pady=20)
 
     def toggle_scanning(self):
         """Toggle wallet scanning on/off."""
@@ -362,12 +293,14 @@ class WalletFrame(ttk.Frame):
             self.progress.start()
             self.thread_spinbox.config(state='disabled')  # Disable during scanning
             self.update_statistics()
+            self.results_display.config(text="Scanning in progress...")
         else:
             # Stop scanning
             self.wallet_scanner.stop_scan()
             self.scan_button.config(text="Start Scanning")
             self.progress.stop()
             self.thread_spinbox.config(state='normal')  # Re-enable after stopping
+            self.results_display.config(text="Scanning stopped")
 
     def update_statistics(self):
         """Update scanning statistics display."""
@@ -384,21 +317,6 @@ class WalletFrame(ttk.Frame):
             # Continue updating while scanning
             self.after(100, self.update_statistics)  # Update more frequently
 
-    def test_node_connection(self):
-        """Test connection to Bitcoin node and show result."""
-        success, message = BitcoinUtils.test_node_connection()
-        if success:
-            messagebox.showinfo("Node Connection", message)
-        else:
-            # Change the message to be more educational and informative
-            messagebox.showinfo(
-                "Educational Mode Active",
-                "Running in educational simulation mode while the Bitcoin node syncs.\n\n"
-                "This mode provides realistic examples and safe practice environment "
-                "for learning about Bitcoin wallets and transactions.\n\n"
-                f"Status: {message}"
-            )
-
     def update_thread_count(self):
         """Update the number of scanning threads."""
         try:
@@ -407,14 +325,11 @@ class WalletFrame(ttk.Frame):
                 raise ValueError("Thread count must be at least 1")
 
             self.wallet_scanner.set_thread_count(new_count)
-
-            # Update statistics immediately
             self.update_statistics()
 
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             self.thread_spinbox.set(self.wallet_scanner.thread_count)
-
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
