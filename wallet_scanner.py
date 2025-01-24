@@ -16,11 +16,12 @@ class WalletScanner:
         self.wallets_with_balance = []
         self.start_time = None
         self.scanning = False
-        self.thread_count = 4  # Default to 4 threads
-        self._executor = None
+        self.thread_count = 1  # Default to 1 thread
+        self._scan_executor = None
+        self._gen_executor = None
         self._futures = []
         self._lock = threading.Lock()
-        self.wallet_queue = Queue(maxsize=10000)  # Increased buffer size for faster processing
+        self.wallet_queue = Queue(maxsize=10000)
 
         # Ensure wallet save directory exists
         self.save_dir = r"C:\test\temp"
@@ -32,14 +33,13 @@ class WalletScanner:
 
     def _wallet_generator_worker(self):
         """Continuously generate new wallets and add to queue."""
+        logging.info("Generator worker started")
         while self.scanning:
             try:
-                if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.9:  # Keep queue 90% filled
-                    # Generate random entropy for new seed phrase
+                if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.9:
                     word_count = 12  # Standard BIP39 length
                     words, entropy = WalletGenerator.generate_seed_phrase(word_count)
 
-                    # Create wallet data
                     wallet_data = {
                         'seed_phrase': ' '.join(words),
                         'entropy': entropy,
@@ -48,27 +48,24 @@ class WalletScanner:
 
                     self.wallet_queue.put(wallet_data)
                 else:
-                    time.sleep(0.01)  # Reduced sleep time for faster generation
+                    time.sleep(0.01)
             except Exception as e:
                 logging.error(f"Generator worker error: {str(e)}")
                 continue
 
     def _scan_worker(self):
         """Worker function for scanning thread."""
+        logging.info("Scan worker started")
         while self.scanning:
             try:
-                # Get next wallet from queue with short timeout
                 try:
                     wallet_data = self.wallet_queue.get(timeout=0.1)
                 except Empty:
                     continue
 
-                # Process wallet data
                 entropy = wallet_data['entropy']
-
-                # Basic address generation (for educational purposes)
                 version_byte = b'\x00'  # mainnet
-                combined = version_byte + entropy[:20]  # Use first 20 bytes for demo
+                combined = version_byte + entropy[:20]
                 checksum = self.generate_checksum(combined)
                 address = base58.b58encode(combined + checksum).decode('utf-8')
 
@@ -102,44 +99,52 @@ class WalletScanner:
         try:
             with self._lock:
                 if not self.scanning:
+                    logging.info(f"Starting scan with {self.thread_count} worker threads")
                     self.scanning = True
                     self.start_time = time.time()
 
-                    # Stop existing executor if any
-                    if self._executor:
-                        self._executor.shutdown(wait=True)
+                    # Shutdown existing executors if any
+                    self._shutdown_executors()
+
+                    # Create separate executors for generator and scanners
+                    self._gen_executor = ThreadPoolExecutor(max_workers=1)
+                    self._scan_executor = ThreadPoolExecutor(max_workers=self.thread_count)
 
                     # Clear futures list
                     self._futures = []
 
-                    # Initialize new thread pool with exactly thread_count workers
-                    self._executor = ThreadPoolExecutor(max_workers=self.thread_count)
+                    # Start generator thread
+                    self._futures.append(self._gen_executor.submit(self._wallet_generator_worker))
 
-                    # Start exactly thread_count workers
+                    # Start scan workers
                     for _ in range(self.thread_count):
-                        self._futures.append(self._executor.submit(self._scan_worker))
+                        self._futures.append(self._scan_executor.submit(self._scan_worker))
 
-                    # Add one generator worker outside the thread count
-                    self._futures.append(ThreadPoolExecutor(max_workers=1).submit(self._wallet_generator_worker))
-
-                    logging.info(f"Started scanning with {self.thread_count} scan workers and 1 generator")
+                    logging.info(f"Started {self.thread_count} scan workers plus 1 generator")
 
         except Exception as e:
             logging.error(f"Error starting scan: {str(e)}")
             self.scanning = False
-            if self._executor:
-                self._executor.shutdown(wait=False)
+            self._shutdown_executors()
+
+    def _shutdown_executors(self):
+        """Safely shut down thread pool executors."""
+        if self._scan_executor:
+            self._scan_executor.shutdown(wait=False)
+            self._scan_executor = None
+        if self._gen_executor:
+            self._gen_executor.shutdown(wait=False)
+            self._gen_executor = None
 
     def stop_scan(self):
         """Stop scanning."""
         with self._lock:
             if self.scanning:
+                logging.info("Stopping scan...")
                 self.scanning = False
-                if self._executor:
-                    self._executor.shutdown(wait=True)
-                    self._executor = None
+                self._shutdown_executors()
                 self._futures = []
-                logging.info("Scanning stopped")
+                logging.info("Scan stopped")
 
     def get_statistics(self):
         """Get current scanning statistics."""
@@ -147,14 +152,14 @@ class WalletScanner:
             elapsed_time = time.time() - (self.start_time or time.time())
             scan_rate = self.total_scanned / (elapsed_time / 60) if elapsed_time > 0 else 0
 
-            # Count only active scanning threads (excluding generator)
-            active_threads = sum(1 for f in self._futures[:-1] if not f.done())  # Exclude generator thread
+            # Count only scan workers (excluding generator)
+            active_scan_threads = sum(1 for f in self._futures[1:] if not f.done())
 
             return {
                 'total_scanned': self.total_scanned,
                 'wallets_with_balance': len(self.wallets_with_balance),
                 'scan_rate': round(scan_rate, 2),
-                'active_threads': active_threads,
+                'active_threads': active_scan_threads,
                 'queue_size': self.wallet_queue.qsize()
             }
 
@@ -164,8 +169,9 @@ class WalletScanner:
             raise ValueError("Thread count must be at least 1")
 
         with self._lock:
+            old_count = self.thread_count
             self.thread_count = count
-            logging.info(f"Thread count set to {count}")
+            logging.info(f"Thread count changed from {old_count} to {count}")
 
             # If scanning is active, restart with new thread count
             if self.scanning:
