@@ -2,7 +2,7 @@
 from datetime import datetime
 
 # Semantic versioning
-VERSION = "0.3.4"  # Removed psutil dependency, using native Windows API
+VERSION = "0.3.5"  # Enhanced Windows CPU utilization with native API optimizations
 BUILD_TIMESTAMP = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Updated whenever version.py is modified
 
 def get_version_info():

@@ -79,15 +79,43 @@ class WalletScanner:
             logging.info(f"Created fallback wallet directory: {self.save_dir}")
 
     def _set_process_priority(self):
-        """Set process priority using native Windows API if available."""
+        """Set process priority and affinity using native Windows API."""
         try:
             if os.name == 'nt':  # Windows
                 import ctypes
+                import ctypes.wintypes
+
+                # Get process handle
                 process = ctypes.windll.kernel32.GetCurrentProcess()
+
+                # Set process priority to HIGH_PRIORITY_CLASS
                 ctypes.windll.kernel32.SetPriorityClass(process, 0x00008000)  # HIGH_PRIORITY_CLASS
-                logging.info("Process priority set to HIGH_PRIORITY_CLASS")
+
+                # Get system info for CPU count
+                system_info = ctypes.wintypes.SYSTEM_INFO()
+                ctypes.windll.kernel32.GetSystemInfo(ctypes.byref(system_info))
+
+                # Calculate processor mask to use all available cores
+                processor_mask = (1 << system_info.dwNumberOfProcessors) - 1
+
+                # Set process affinity mask to use all cores
+                ctypes.windll.kernel32.SetProcessAffinityMask(process, processor_mask)
+
+                logging.info(f"Process priority set to HIGH_PRIORITY_CLASS with full core affinity")
+                logging.info(f"Using {system_info.dwNumberOfProcessors} processor cores")
+
+                # Update thread count based on actual core count
+                self.cpu_thread_count = system_info.dwNumberOfProcessors
+                # Increase batch size for better CPU utilization
+                self.CPU_BATCH_SIZE = max(2000 * self.cpu_thread_count, 10000)
+
+            else:  # Non-Windows systems
+                os.nice(0)  # Reset to normal priority
+                self.cpu_thread_count = max(multiprocessing.cpu_count() - 1, 1)
+
         except Exception as e:
             logging.warning(f"Failed to set process priority: {str(e)}")
+            self.cpu_thread_count = max(multiprocessing.cpu_count() // 2, 1)
 
     def _process_initializer(self):
         """Initialize worker process with optimized settings."""
@@ -303,7 +331,7 @@ class WalletScanner:
         try:
             with self._lock:
                 if not self.scanning:
-                    logging.info(f"Starting scan with {self.cpu_thread_count} physical CPU cores")
+                    logging.info(f"Starting scan with {self.cpu_thread_count} CPU cores")
                     if self.gpu_enabled and self.gpu_hasher:
                         logging.info(f"GPU enabled with {self.gpu_thread_count} threads")
 
@@ -326,11 +354,17 @@ class WalletScanner:
 
                     self._cleanup_executors()
 
-                    # Set main process priority
+                    # Set main process priority and affinity
                     self._set_process_priority()
 
-                    # Create optimized process pool
-                    self._executor = ThreadPoolExecutor(max_workers=2)
+                    # Create optimized process pool with Windows-specific settings
+                    if os.name == 'nt':
+                        # Use more threads on Windows for better CPU utilization
+                        executor_workers = self.cpu_thread_count * 2
+                    else:
+                        executor_workers = self.cpu_thread_count
+
+                    self._executor = ThreadPoolExecutor(max_workers=executor_workers)
                     self._process_pool = ProcessPoolExecutor(
                         max_workers=self.cpu_thread_count,
                         mp_context=multiprocessing.get_context('spawn'),
@@ -341,8 +375,9 @@ class WalletScanner:
                     gen_future = self._executor.submit(self._wallet_generator_worker)
                     self._futures = [gen_future]
 
-                    # Start CPU workers
-                    for _ in range(self.cpu_thread_count):
+                    # Start more CPU workers on Windows
+                    worker_count = executor_workers if os.name == 'nt' else self.cpu_thread_count
+                    for _ in range(worker_count):
                         scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
 
