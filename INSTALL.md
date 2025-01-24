@@ -12,7 +12,7 @@ Download and install Python 3.11 from [python.org](https://www.python.org/downlo
 
 Important: During Python installation:
 - Check "Add Python to PATH"
-- Ensure "tcl/tk and IDLE" is selected (this includes tkinter)
+- Ensure "tcl/tk and IDLE" is selected (this includes tkinter, which is required for the GUI)
 
 Verify installation:
 ```bash
@@ -27,10 +27,10 @@ cd <repository-directory>
 
 ### 3. Install Required Packages
 ```bash
-pip install base58check python-bitcoinrpc
+pip install base58 base58check python-bitcoinrpc
 ```
 
-Note: tkinter comes with Python installation and doesn't need to be installed separately via pip.
+Note: tkinter is included with Python's standard installation when you select "tcl/tk and IDLE" during Python setup. You don't need to install it separately via pip.
 
 ### 4. Run the Application
 ```bash
@@ -58,9 +58,15 @@ The application will run in educational mode if no node is configured.
    ```
    ModuleNotFoundError: No module named 'base58check'
    ```
-   Solution: Run `pip install base58check`
+   Solution: Run `pip install base58 base58check`
 
-2. Bitcoin Node Connection Issues
+2. Tkinter Import Error
+   ```
+   ModuleNotFoundError: No module named 'tkinter'
+   ```
+   Solution: Reinstall Python and make sure to select "tcl/tk and IDLE" during installation
+
+3. Bitcoin Node Connection Issues
    - Verify your node is running
    - Check your RPC credentials
    - The application will continue in educational mode
