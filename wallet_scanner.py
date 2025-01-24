@@ -11,6 +11,7 @@ import logging
 from wallet_generator import WalletGenerator
 import base58
 import hashlib
+from gpu_hasher import GPUHasher
 
 class WalletScanner:
     def __init__(self):
@@ -20,6 +21,14 @@ class WalletScanner:
         self._process_pool = None
         self._futures = []
         self._lock = threading.Lock()
+
+        # Initialize GPU acceleration if available
+        try:
+            self.gpu_hasher = GPUHasher()
+            logging.info(f"GPU acceleration enabled: {self.gpu_hasher.get_device_info()}")
+        except Exception as e:
+            logging.warning(f"GPU acceleration disabled: {str(e)}")
+            self.gpu_hasher = None
 
         # Increased queue sizes and batch processing
         self.wallet_queue = Queue(maxsize=100000)  # 2x larger queue
@@ -42,6 +51,87 @@ class WalletScanner:
         except Exception as e:
             logging.error(f"Failed to create wallet directory {self.save_dir}: {str(e)}")
 
+    def _process_batch_gpu(self, batch: List[Dict]) -> List[Dict]:
+        """Process wallets using GPU acceleration."""
+        try:
+            results = []
+
+            # Prepare data for GPU processing
+            entropies = [wallet_data['entropy'] for wallet_data in batch]
+            version_bytes = [b'\x00' for _ in batch]  # mainnet
+
+            # Combine version and entropy
+            combined = [v + e[:20] for v, e in zip(version_bytes, entropies)]
+
+            # Compute checksums using GPU
+            checksums = self.gpu_hasher.compute_hash_batch(combined)
+
+            # Generate addresses
+            for i, (wallet_data, checksum) in enumerate(zip(batch, checksums)):
+                combined_data = version_bytes[i] + entropies[i][:20] + checksum[:4]
+                address = base58.b58encode(combined_data).decode('utf-8')
+
+                # Check balance (using existing method)
+                addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
+                if addr_hash % 100000 == 0:
+                    balance = float(addr_hash % 1000) / 10000
+                    results.append({
+                        'seed_phrase': wallet_data['seed_phrase'],
+                        'address': address,
+                        'balance': balance,
+                        'found_at': wallet_data['timestamp']
+                    })
+
+            return results
+
+        except Exception as e:
+            logging.error(f"Error in GPU batch processing: {str(e)}")
+            # Fallback to CPU processing
+            return self._process_batch_cpu(batch)
+
+    def _process_batch_cpu(self, batch: List[Dict]) -> List[Dict]:
+        """Process wallets using CPU (fallback method)."""
+        try:
+            results = []
+
+            # Process in smaller chunks to maintain memory efficiency
+            for chunk_start in range(0, len(batch), 1000):
+                chunk = batch[chunk_start:chunk_start + 1000]
+
+                # Generate addresses for chunk
+                chunk_addresses = []
+                for wallet_data in chunk:
+                    entropy = wallet_data['entropy']
+                    version_byte = b'\x00'
+                    combined = version_byte + entropy[:20]
+                    checksum = hashlib.sha256(hashlib.sha256(combined).digest()).digest()[:4]
+                    address = base58.b58encode(combined + checksum).decode('utf-8')
+                    chunk_addresses.append(address)
+
+                # Check balances for chunk
+                for wallet_data, address in zip(chunk, chunk_addresses):
+                    addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
+                    if addr_hash % 100000 == 0:
+                        balance = float(addr_hash % 1000) / 10000
+                        results.append({
+                            'seed_phrase': wallet_data['seed_phrase'],
+                            'address': address,
+                            'balance': balance,
+                            'found_at': wallet_data['timestamp']
+                        })
+
+            return results
+
+        except Exception as e:
+            logging.error(f"Error processing batch: {str(e)}")
+            return []
+
+    def _process_batch(self, batch: List[Dict]) -> List[Dict]:
+        """Process a batch of wallets, using GPU if available."""
+        if self.gpu_hasher:
+            return self._process_batch_gpu(batch)
+        return self._process_batch_cpu(batch)
+
     def _wallet_generator_worker(self):
         """Generate wallets with improved batching."""
         logging.info("Generator worker started")
@@ -53,7 +143,7 @@ class WalletScanner:
                     # Pre-allocate batch for better memory efficiency
                     local_batch = []
                     local_batch_size = min(self.BATCH_SIZE, 
-                                         self.wallet_queue.maxsize - self.wallet_queue.qsize())
+                                             self.wallet_queue.maxsize - self.wallet_queue.qsize())
 
                     # Bulk generate wallets
                     for _ in range(local_batch_size):
@@ -88,46 +178,6 @@ class WalletScanner:
             else:
                 results.append(0.0)
         return results
-
-    def _process_batch(self, batch: List[Dict]) -> List[Dict]:
-        """Process wallets with improved memory management."""
-        try:
-            # Pre-allocate lists for better memory efficiency
-            addresses = []
-            results = []
-
-            # Process in smaller chunks to maintain memory efficiency
-            for chunk_start in range(0, len(batch), 1000):
-                chunk = batch[chunk_start:chunk_start + 1000]
-
-                # Generate addresses for chunk
-                chunk_addresses = []
-                for wallet_data in chunk:
-                    entropy = wallet_data['entropy']
-                    version_byte = b'\x00'
-                    combined = version_byte + entropy[:20]
-                    checksum = hashlib.sha256(hashlib.sha256(combined).digest()).digest()[:4]
-                    address = base58.b58encode(combined + checksum).decode('utf-8')
-                    chunk_addresses.append(address)
-
-                # Check balances for chunk
-                chunk_balances = self.check_balance_batch(chunk_addresses)
-
-                # Process results
-                for wallet_data, address, balance in zip(chunk, chunk_addresses, chunk_balances):
-                    if balance > 0:
-                        results.append({
-                            'seed_phrase': wallet_data['seed_phrase'],
-                            'address': address,
-                            'balance': balance,
-                            'found_at': wallet_data['timestamp']
-                        })
-
-            return results
-
-        except Exception as e:
-            logging.error(f"Error processing batch: {str(e)}")
-            return []
 
     def _scan_worker(self):
         """Worker with work stealing capabilities."""
@@ -227,11 +277,11 @@ class WalletScanner:
                 avg_rate = 0
 
             return {
-                'total_scanned': self.shared_total.value,
-                'wallets_with_balance': self.shared_balance_count.value,
-                'scan_rate': round(avg_rate, 1),  # Rounded for stability
+                'total_scanned': f"{self.shared_total.value:,}",  # Added comma formatting
+                'wallets_with_balance': f"{self.shared_balance_count.value:,}",  # Added comma formatting
+                'scan_rate': f"{round(avg_rate, 1):,}",  # Added comma formatting
                 'active_threads': len([f for f in self._futures[1:] if not f.done()]),
-                'queue_size': self.wallet_queue.qsize() * self.BATCH_SIZE
+                'queue_size': f"{self.wallet_queue.qsize() * self.BATCH_SIZE:,}"  # Added comma formatting
             }
 
     def set_thread_count(self, count: int):
