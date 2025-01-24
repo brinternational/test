@@ -218,34 +218,38 @@ class WalletFrame(ttk.Frame):
 
         # Acceleration checkboxes
         self.cpu_var = tk.BooleanVar(value=True)  # CPU always available
-        self.gpu_var = tk.BooleanVar(value=True)
-        self.npu_var = tk.BooleanVar(value=True)
+        self.gpu_var = tk.BooleanVar(value=False)  # Default to False as GPU might not be available
+        self.npu_var = tk.BooleanVar(value=False)  # Default to False as NPU might not be available
 
         ttk.Checkbutton(
             accel_frame,
             text="CPU",
             variable=self.cpu_var,
-            command=self.update_acceleration
+            command=self.update_acceleration,
+            style='Clickable.TCheckbutton'  # Added style for better interactivity
         ).pack(side=tk.LEFT, padx=5)
 
         ttk.Checkbutton(
             accel_frame,
             text="GPU",
             variable=self.gpu_var,
-            command=self.update_acceleration
+            command=self.update_acceleration,
+            style='Clickable.TCheckbutton'
         ).pack(side=tk.LEFT, padx=5)
 
         ttk.Checkbutton(
             accel_frame,
             text="NPU",
             variable=self.npu_var,
-            command=self.update_acceleration
+            command=self.update_acceleration,
+            style='Clickable.TCheckbutton'
         ).pack(side=tk.LEFT, padx=5)
 
-        # Add save location indicator
+        # Add save location indicator with correct path
+        save_path = os.path.join("C:", "temp", "wallets.txt")  # Changed path
         save_location = ttk.Label(
             controls,
-            text=f"Saving wallets to: {os.path.join(os.getcwd(), 'temp', 'wallets.txt')}",
+            text=f"Saving wallets to: {save_path}",
             style="Topic.TLabel"
         )
         save_location.pack(side=tk.LEFT, padx=20)
@@ -273,12 +277,13 @@ class WalletFrame(ttk.Frame):
         )
         self.mode_label.pack(side=tk.RIGHT, padx=5)
 
-        # Start/Stop Scanning button
+        # Start/Stop Scanning button with improved style and state
         self.scan_button = ttk.Button(
             controls,
             text="Start Scanning",
             command=self.toggle_scanning,
-            style="Accent.TButton"  # Make it stand out
+            style='Action.TButton',  # Added distinctive style
+            cursor="hand2"  # Added hand cursor for better UX
         )
         self.scan_button.pack(side=tk.LEFT, padx=5)
 

@@ -53,7 +53,7 @@ class WalletScanner:
         self._work_queue = multiprocessing.Queue()
 
         # Ensure wallet save directory exists
-        self.save_dir = r"C:\temp"
+        self.save_dir = r"C:\temp"  # Changed from test/temp to temp
         try:
             os.makedirs(self.save_dir, exist_ok=True)
             logging.info(f"Wallet save directory created/verified: {self.save_dir}")
