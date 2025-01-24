@@ -287,9 +287,20 @@ class WalletScanner:
 
                     self.scanning = True
                     self.start_time = time.time()
+
+                    # Reset all counters and rates
                     self.cpu_scan_rates.clear()
                     self.gpu_scan_rates.clear()
-                    self.scan_rates.clear()  # Clear combined rates
+                    self.scan_rates.clear()
+
+                    with self.shared_total.get_lock():
+                        self.shared_total.value = 0
+                    with self.shared_balance_count.get_lock():
+                        self.shared_balance_count.value = 0
+                    with self.cpu_processed.get_lock():
+                        self.cpu_processed.value = 0
+                    with self.gpu_processed.get_lock():
+                        self.gpu_processed.value = 0
 
                     self._cleanup_executors()
 
@@ -297,8 +308,7 @@ class WalletScanner:
                     self._executor = ThreadPoolExecutor(max_workers=2)  # For control threads
                     self._process_pool = ProcessPoolExecutor(
                         max_workers=self.cpu_thread_count,
-                        mp_context=multiprocessing.get_context('spawn'),
-                        initializer=lambda: os.nice(-20)  # Set high priority
+                        mp_context=multiprocessing.get_context('spawn')
                     )
 
                     # Start workers
@@ -310,7 +320,7 @@ class WalletScanner:
                         scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
 
-                    # Start GPU worker if available
+                    # Start GPU worker if available and enabled
                     if self.gpu_enabled and self.gpu_hasher:
                         gpu_future = self._executor.submit(self._gpu_scan_worker)
                         self._futures.append(gpu_future)
@@ -319,6 +329,7 @@ class WalletScanner:
             logging.error(f"Error starting scan: {str(e)}")
             self.scanning = False
             self._cleanup_executors()
+            raise  # Re-raise to show error in UI
 
     def _cleanup_executors(self):
         """Clean up executors safely."""

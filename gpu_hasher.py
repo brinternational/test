@@ -123,7 +123,11 @@ class GPUHasher:
         try:
             platforms = cl.get_platforms()
             if not platforms:
-                raise RuntimeError("No OpenCL platforms available - falling back to CPU")
+                logging.warning("No OpenCL platforms available - falling back to CPU")
+                self.device_type = "CPU"
+                self.enable_gpu = False
+                self.enable_npu = False
+                return
 
             selected_device = None
             platform = platforms[0]
@@ -135,8 +139,8 @@ class GPUHasher:
                     if selected_device:
                         self.device_type = "NPU"
                         logging.info("NPU acceleration enabled")
-                except:
-                    logging.warning("NPU detection failed")
+                except Exception as e:
+                    logging.warning(f"NPU detection failed: {str(e)}")
 
             if self.enable_gpu and not selected_device:
                 try:
@@ -145,8 +149,8 @@ class GPUHasher:
                         selected_device = devices[0]
                         self.device_type = "GPU"
                         logging.info("GPU acceleration enabled")
-                except:
-                    logging.warning("GPU detection failed")
+                except Exception as e:
+                    logging.warning(f"GPU detection failed: {str(e)}")
 
             if self.enable_cpu and not selected_device:
                 try:
@@ -155,11 +159,15 @@ class GPUHasher:
                         selected_device = devices[0]
                         self.device_type = "CPU"
                         logging.info("CPU acceleration enabled")
-                except:
-                    logging.warning("CPU detection failed")
+                except Exception as e:
+                    logging.warning(f"CPU detection failed: {str(e)}")
 
             if not selected_device:
-                raise RuntimeError("No compatible acceleration devices found")
+                logging.warning("No compatible acceleration devices found - using CPU")
+                self.device_type = "CPU"
+                self.enable_gpu = False
+                self.enable_npu = False
+                return
 
             # Initialize OpenCL context and queue
             self.ctx = cl.Context([selected_device])
@@ -171,7 +179,9 @@ class GPUHasher:
 
         except Exception as e:
             logging.error(f"Acceleration initialization failed: {str(e)}")
-            raise
+            self.device_type = "CPU"
+            self.enable_gpu = False
+            self.enable_npu = False
 
     def _verify_device_capabilities(self, device):
         """Verify if device meets minimum requirements."""
