@@ -298,24 +298,45 @@ class WalletFrame(ttk.Frame):
         self.transaction_display.pack(pady=10)
 
     def generate_seed(self):
-        words, _ = wallet_generator.WalletGenerator.generate_seed_phrase()
-        self.seed_display.config(
-            text="Seed Phrase:\n" + " ".join(words)
-        )
+        """Generate new seed phrase and derive addresses"""
+        try:
+            # Generate new seed phrase
+            words, entropy = wallet_generator.WalletGenerator.generate_seed_phrase()
+            self.seed_display.config(
+                text="Generated Seed Phrase (BIP39):\n" + " ".join(words),
+                foreground="#388E3C"  # Success green
+            )
 
-        # Generate mock address and transaction data
-        address_info = BitcoinUtils.derive_addresses(" ".join(words).encode())
-        self.address_display.config(
-            text=f"Generated Address:\n{address_info['address']}"
-        )
-        self.transaction_display.config(
-            text=f"Last Transaction Date: {address_info['last_transaction']}"
-        )
+            # Derive addresses from seed
+            addresses = BitcoinUtils.derive_addresses(entropy)
 
-        # Add to scanner
-        if self.wallet_scanner.scanning:
-            self.wallet_scanner.add_wallet(address_info)
-            self.update_statistics()
+            # Format address display
+            address_text = (
+                f"Derived Addresses:\n\n"
+                f"Legacy (P2PKH):\n{addresses['legacy_address']}\n\n"
+                f"SegWit (P2SH):\n{addresses['segwit_address']}\n\n"
+                f"Native SegWit (P2WPKH):\n{addresses['native_segwit']}\n\n"
+                f"Balance: {addresses['balance']:.8f} BTC\n"
+                f"Last Transaction: {addresses['last_transaction']}"
+            )
+
+            self.address_display.config(
+                text=address_text,
+                foreground="#000000"
+            )
+
+            # Add addresses to scanner if running
+            if self.wallet_scanner.scanning:
+                self.wallet_scanner.add_wallet(addresses)
+                self.update_statistics()
+
+        except Exception as e:
+            error_msg = f"Error generating wallet: {str(e)}"
+            self.seed_display.config(
+                text=error_msg,
+                foreground="#D32F2F"  # Error red
+            )
+            messagebox.showerror("Error", error_msg)
 
     def toggle_scanning(self):
         if not self.wallet_scanner.scanning:

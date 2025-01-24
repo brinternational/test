@@ -1,9 +1,10 @@
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 import hashlib
 import hmac
 from datetime import datetime, timedelta
 import random
+import base58
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
@@ -104,7 +105,6 @@ class BitcoinUtils:
             )
         except Exception as e:
             cls.MOCK_MODE = True
-            error_type = str(type(e).__name__)
             if "ConnectionRefusedError" in str(e):
                 message = "Connection refused. Please check if the Bitcoin node is running."
             elif "AuthenticationError" in str(e):
@@ -120,34 +120,45 @@ class BitcoinUtils:
             )
 
     @classmethod
-    def derive_addresses(cls, seed: bytes, path: str = "m/44'/0'/0'/0/0") -> Dict[str, str]:
+    def derive_addresses(cls, seed: bytes, path: str = "m/44'/0'/0'/0/0") -> Dict[str, Union[str, float]]:
         """
-        Derive Bitcoin addresses from seed (mock implementation for educational purposes).
-        In real implementation, this would use proper BIP32/44/84 derivation.
+        Derive Bitcoin addresses from seed using BIP44 derivation path.
+        For educational purposes, we're generating deterministic but mock addresses.
+        In production, this would use proper BIP32/44/84 derivation.
         """
-        # Generate deterministic but mock values based on the seed
-        mock_private_key = hmac.new(seed, path.encode(), hashlib.sha512).hexdigest()
-        mock_public_key = hashlib.sha256(mock_private_key.encode()).hexdigest()
+        # Generate deterministic keys based on the seed and path
+        key_material = hmac.new(seed, path.encode(), hashlib.sha512).digest()
+        private_key = key_material[:32]
+        chain_code = key_material[32:]
+
+        # Generate mock public key (in real implementation, this would use secp256k1)
+        public_key = hashlib.sha256(private_key).digest()
 
         # Generate different address formats for education
-        legacy_address = "1" + mock_public_key[:32]  # Legacy format
-        segwit_address = "3" + mock_public_key[32:64]  # SegWit format
-        native_segwit = "bc1" + mock_public_key[:32]  # Native SegWit format
+        # In real implementation, these would be properly derived using:
+        # - Legacy (P2PKH): Base58Check(hash160(public_key))
+        # - SegWit (P2SH): Base58Check(hash160(redeemScript))
+        # - Native SegWit (P2WPKH): Bech32("bc1" + hash160(public_key))
 
-        # Generate mock transaction history
-        days_ago = random.randint(0, 365)
-        last_transaction = datetime.now() - timedelta(days=days_ago)
+        mock_hash = hashlib.sha256(public_key).hexdigest()
+        legacy_address = f"1{mock_hash[:32]}"  # P2PKH format
+        segwit_address = f"3{mock_hash[32:64]}"  # P2SH format
+        native_segwit = f"bc1{mock_hash[:32]}"  # Native SegWit format
 
-        # Educational balance generation (1% chance of having balance)
-        balance = random.uniform(0.1, 2.0) if random.random() < 0.01 else 0.0
+        # Generate mock transaction history (deterministic based on chain_code)
+        last_tx_days = int.from_bytes(hashlib.sha256(chain_code).digest()[:4], 'big') % 365
+        last_transaction = (datetime.now() - timedelta(days=last_tx_days)).strftime("%Y-%m-%d")
+
+        # Educational balance generation (deterministic based on address)
+        balance = float(int.from_bytes(hashlib.sha256(public_key).digest()[:8], 'big')) / 10**12
 
         return {
-            "private_key": mock_private_key,
-            "public_key": mock_public_key,
+            "private_key": private_key.hex(),
+            "public_key": public_key.hex(),
             "legacy_address": legacy_address,
             "segwit_address": segwit_address,
             "native_segwit": native_segwit,
-            "last_transaction": last_transaction.strftime("%Y-%m-%d"),
+            "last_transaction": last_transaction,
             "balance": balance
         }
 
@@ -163,8 +174,7 @@ class BitcoinUtils:
                 print(f"Node error, falling back to mock mode: {str(e)}")
                 cls.MOCK_MODE = True
 
-        # Mock balance for educational purposes
-        # Generate consistent mock balance based on address
+        # Generate deterministic mock balance based on address
         address_hash = int(hashlib.sha256(address.encode()).hexdigest()[:8], 16)
         mock_balance = (address_hash % 1000) / 100 if address_hash % 100 == 0 else 0
         return mock_balance
