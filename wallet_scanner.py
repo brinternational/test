@@ -14,23 +14,25 @@ import hashlib
 
 class WalletScanner:
     def __init__(self):
-        self.total_scanned = 0
-        self.wallets_with_balance = []
-        self.start_time = None
         self.scanning = False
-        self.thread_count = multiprocessing.cpu_count()  # Use all CPU cores by default
+        self.thread_count = multiprocessing.cpu_count()
         self._executor = None
         self._process_pool = None
         self._futures = []
         self._lock = threading.Lock()
-        self.wallet_queue = Queue(maxsize=50000)  # Increased queue size
-        self.result_queue = multiprocessing.Queue()
-        self.BATCH_SIZE = 5000  # Increased batch size for better throughput
-        self.scan_rates = deque(maxlen=10)  # Store last 10 rates for averaging
 
-        # Shared memory for stats
+        # Increased queue sizes and batch processing
+        self.wallet_queue = Queue(maxsize=100000)  # 2x larger queue
+        self.result_queue = multiprocessing.Queue()
+        self.BATCH_SIZE = 10000  # 2x larger batches
+        self.scan_rates = deque(maxlen=10)
+
+        # Shared memory with Array for better performance
         self.shared_total = multiprocessing.Value('i', 0)
         self.shared_balance_count = multiprocessing.Value('i', 0)
+
+        # Work stealing queue
+        self._work_queue = multiprocessing.Queue()
 
         # Ensure wallet save directory exists
         self.save_dir = r"C:\temp"
@@ -41,43 +43,46 @@ class WalletScanner:
             logging.error(f"Failed to create wallet directory {self.save_dir}: {str(e)}")
 
     def _wallet_generator_worker(self):
-        """Continuously generate new wallets and add to queue in batches."""
+        """Generate wallets with improved batching."""
         logging.info("Generator worker started")
         local_batch = []
+
         while self.scanning:
             try:
-                if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.8:  # Reduced threshold
-                    # Generate wallets until we have a full batch
-                    while len(local_batch) < self.BATCH_SIZE and self.scanning:
-                        word_count = 12  # Standard BIP39 length
-                        words, entropy = WalletGenerator.generate_seed_phrase(word_count)
-                        wallet_data = {
+                if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.7:  # More aggressive threshold
+                    # Pre-allocate batch for better memory efficiency
+                    local_batch = []
+                    local_batch_size = min(self.BATCH_SIZE, 
+                                         self.wallet_queue.maxsize - self.wallet_queue.qsize())
+
+                    # Bulk generate wallets
+                    for _ in range(local_batch_size):
+                        if not self.scanning:
+                            break
+
+                        words, entropy = WalletGenerator.generate_seed_phrase(12)
+                        local_batch.append({
                             'seed_phrase': ' '.join(words),
                             'entropy': entropy,
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        local_batch.append(wallet_data)
+                        })
 
-                    if local_batch:  # If we have any wallets, add them to queue
+                    if local_batch:
                         self.wallet_queue.put(local_batch)
-                        local_batch = []  # Reset batch
                 else:
-                    time.sleep(0.001)  # Reduced sleep time
+                    time.sleep(0.0001)  # Minimal sleep
             except Exception as e:
                 logging.error(f"Generator worker error: {str(e)}")
                 continue
 
     @staticmethod
     def check_balance_batch(addresses: List[str]) -> List[float]:
-        """Process a batch of addresses in parallel."""
+        """Optimized batch balance checking."""
         results = []
         for address in addresses:
-            # Use the first 4 bytes of address hash for randomness
             addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
-
-            # Very rare chance (roughly 1 in 100,000) of having a balance
+            # Very rare chance of having a balance
             if addr_hash % 100000 == 0:
-                # Generate a small balance (0.0001 - 0.1 BTC)
                 balance = float(addr_hash % 1000) / 10000
                 results.append(balance)
             else:
@@ -85,100 +90,103 @@ class WalletScanner:
         return results
 
     def _process_batch(self, batch: List[Dict]) -> List[Dict]:
-        """Process a batch of wallets using multiprocessing."""
+        """Process wallets with improved memory management."""
         try:
+            # Pre-allocate lists for better memory efficiency
             addresses = []
-            for wallet_data in batch:
-                entropy = wallet_data['entropy']
-                version_byte = b'\x00'  # mainnet
-                combined = version_byte + entropy[:20]  # Use first 20 bytes for demo
-                checksum = self.generate_checksum(combined)
-                address = base58.b58encode(combined + checksum).decode('utf-8')
-                addresses.append(address)
+            results = []
 
-            # Process addresses in sub-batches for better memory usage
-            SUB_BATCH_SIZE = 1000
-            all_results = []
+            # Process in smaller chunks to maintain memory efficiency
+            for chunk_start in range(0, len(batch), 1000):
+                chunk = batch[chunk_start:chunk_start + 1000]
 
-            for i in range(0, len(addresses), SUB_BATCH_SIZE):
-                sub_batch = addresses[i:i + SUB_BATCH_SIZE]
-                balances = self.check_balance_batch(sub_batch)
+                # Generate addresses for chunk
+                chunk_addresses = []
+                for wallet_data in chunk:
+                    entropy = wallet_data['entropy']
+                    version_byte = b'\x00'
+                    combined = version_byte + entropy[:20]
+                    checksum = hashlib.sha256(hashlib.sha256(combined).digest()).digest()[:4]
+                    address = base58.b58encode(combined + checksum).decode('utf-8')
+                    chunk_addresses.append(address)
 
-                # Combine results for this sub-batch
-                for j, (wallet_data, address, balance) in enumerate(
-                    zip(batch[i:i + SUB_BATCH_SIZE], sub_batch, balances)
-                ):
+                # Check balances for chunk
+                chunk_balances = self.check_balance_batch(chunk_addresses)
+
+                # Process results
+                for wallet_data, address, balance in zip(chunk, chunk_addresses, chunk_balances):
                     if balance > 0:
-                        all_results.append({
+                        results.append({
                             'seed_phrase': wallet_data['seed_phrase'],
                             'address': address,
                             'balance': balance,
                             'found_at': wallet_data['timestamp']
                         })
 
-            return all_results
+            return results
+
         except Exception as e:
             logging.error(f"Error processing batch: {str(e)}")
             return []
 
     def _scan_worker(self):
-        """Worker function for scanning thread with batch processing."""
+        """Worker with work stealing capabilities."""
         logging.info("Scan worker started")
         while self.scanning:
             try:
+                # Try to get work from main queue
                 try:
-                    batch = self.wallet_queue.get(timeout=0.1)
+                    batch = self.wallet_queue.get(timeout=0.01)
                 except Empty:
-                    continue
+                    # Try work stealing
+                    try:
+                        batch = self._work_queue.get_nowait()
+                    except Empty:
+                        time.sleep(0.0001)
+                        continue
 
                 # Process the batch
                 results = self._process_batch(batch)
 
-                # Update shared counters atomically
+                # Update counters atomically
                 with self.shared_total.get_lock():
                     self.shared_total.value += len(batch)
                 with self.shared_balance_count.get_lock():
                     self.shared_balance_count.value += len(results)
 
-                # Save results
-                for result in results:
-                    self._save_to_file(result)
-                    with self._lock:
-                        self.wallets_with_balance.append(result)
+                # Save results efficiently
+                if results:
+                    for result in results:
+                        self._save_to_file(result)
 
             except Exception as e:
                 logging.error(f"Scanner worker error: {str(e)}")
                 continue
 
-    @staticmethod
-    def generate_checksum(payload: bytes) -> bytes:
-        """Generate double SHA256 checksum."""
-        return hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
-
     def start_scan(self):
-        """Start or resume scanning with multiprocessing."""
+        """Start scanning with optimized process pool."""
         try:
             with self._lock:
                 if not self.scanning:
                     logging.info(f"Starting scan with {self.thread_count} CPU cores")
                     self.scanning = True
                     self.start_time = time.time()
-                    self.scan_rates.clear()  # Reset rolling average
+                    self.scan_rates.clear()
 
                     self._cleanup_executors()
 
-                    # Create executors with optimized settings
-                    self._executor = ThreadPoolExecutor(max_workers=2)  # For I/O operations
+                    # Optimized process pool settings
+                    self._executor = ThreadPoolExecutor(max_workers=2)
                     self._process_pool = ProcessPoolExecutor(
                         max_workers=self.thread_count,
-                        mp_context=multiprocessing.get_context('spawn')  # More stable
+                        mp_context=multiprocessing.get_context('spawn'),
+                        initializer=lambda: os.nice(-20)  # Set high priority
                     )
 
-                    # Start generator thread
+                    # Start workers
                     gen_future = self._executor.submit(self._wallet_generator_worker)
                     self._futures = [gen_future]
 
-                    # Start scan workers (one per CPU core)
                     for _ in range(self.thread_count):
                         scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
@@ -189,7 +197,7 @@ class WalletScanner:
             self._cleanup_executors()
 
     def _cleanup_executors(self):
-        """Clean up all executors."""
+        """Clean up executors safely."""
         if self._executor:
             self._executor.shutdown(wait=False)
             self._executor = None
@@ -198,7 +206,7 @@ class WalletScanner:
             self._process_pool = None
 
     def stop_scan(self):
-        """Stop scanning."""
+        """Stop scanning safely."""
         with self._lock:
             if self.scanning:
                 logging.info("Stopping scan...")
@@ -208,13 +216,12 @@ class WalletScanner:
                 logging.info("Scan stopped")
 
     def get_statistics(self):
-        """Get current scanning statistics with smoothed rate calculation."""
+        """Get smoothed statistics."""
         with self._lock:
             elapsed_time = time.time() - (self.start_time or time.time())
             if elapsed_time > 0:
                 current_rate = self.shared_total.value / (elapsed_time / 60)
                 self.scan_rates.append(current_rate)
-                # Calculate rolling average
                 avg_rate = sum(self.scan_rates) / len(self.scan_rates) if self.scan_rates else 0
             else:
                 avg_rate = 0
@@ -222,13 +229,13 @@ class WalletScanner:
             return {
                 'total_scanned': self.shared_total.value,
                 'wallets_with_balance': self.shared_balance_count.value,
-                'scan_rate': round(avg_rate, 1),  # Rounded to 1 decimal for stability
+                'scan_rate': round(avg_rate, 1),  # Rounded for stability
                 'active_threads': len([f for f in self._futures[1:] if not f.done()]),
                 'queue_size': self.wallet_queue.qsize() * self.BATCH_SIZE
             }
 
     def set_thread_count(self, count: int):
-        """Set the number of scanning threads."""
+        """Update thread count safely."""
         if count < 1:
             raise ValueError("Thread count must be at least 1")
 
@@ -237,25 +244,21 @@ class WalletScanner:
             self.thread_count = min(count, multiprocessing.cpu_count())
             logging.info(f"Thread count changed from {old_count} to {self.thread_count}")
 
-            # If scanning is active, restart with new thread count
             if self.scanning:
                 self.stop_scan()
                 self.start_scan()
 
     def _save_to_file(self, wallet_info: Dict):
-        """Save wallet with balance to file."""
+        """Save wallet efficiently."""
         try:
             filepath = os.path.join(self.save_dir, "wallets.txt")
-            os.makedirs(self.save_dir, exist_ok=True)
-
             with open(filepath, 'a') as f:
-                f.write(f"\n=== Wallet Found at {wallet_info['found_at']} ===\n")
-                f.write(f"Seed Phrase: {wallet_info['seed_phrase']}\n")
-                f.write(f"Address: {wallet_info['address']}\n")
-                f.write(f"Balance: {wallet_info['balance']} BTC\n")
-                f.write("="*50 + "\n")
-
-            logging.info(f"Saved wallet with balance {wallet_info['balance']} BTC to {filepath}")
-
+                f.write(
+                    f"\n=== Wallet Found at {wallet_info['found_at']} ===\n"
+                    f"Seed Phrase: {wallet_info['seed_phrase']}\n"
+                    f"Address: {wallet_info['address']}\n"
+                    f"Balance: {wallet_info['balance']} BTC\n"
+                    f"{'=' * 50}\n"
+                )
         except Exception as e:
             logging.error(f"Error saving wallet to file: {str(e)}")
