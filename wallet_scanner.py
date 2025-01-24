@@ -43,7 +43,8 @@ class WalletScanner:
                     self._futures = remaining_futures[:count]
                     # Remove completed futures
                     for future in done_futures:
-                        self._futures.remove(future)
+                        if future in self._futures:
+                            self._futures.remove(future)
 
                 # Shutdown existing executor and create new one
                 self._executor.shutdown(wait=False)
@@ -59,58 +60,28 @@ class WalletScanner:
     def start_scan(self):
         """Start or resume scanning."""
         with self._lock:
-            self.start_time = time.time()
-            self.scanning = True
+            if not self.scanning:
+                self.start_time = time.time()
+                self.scanning = True
 
-            # Initialize thread pool if needed
-            if not self._executor:
-                self.set_thread_count(self.thread_count)
+                # Initialize thread pool if needed
+                if not self._executor:
+                    self.set_thread_count(self.thread_count)
 
-            # Start scanning threads
-            while len(self._futures) < self.thread_count:
-                self._futures.append(self._executor.submit(self._scan_worker))
+                # Start scanning threads
+                while len(self._futures) < self.thread_count:
+                    self._futures.append(self._executor.submit(self._scan_worker))
 
     def stop_scan(self):
         """Stop scanning."""
         with self._lock:
-            self.scanning = False
-            if self._executor:
-                # Wait for threads to complete
-                self._executor.shutdown(wait=True)
-                self._executor = None
-                self._futures = []
-
-    def git_commit_changes(self, message: str):
-        """Commit changes to git repository"""
-        try:
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
-            return True, "Changes committed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git commit failed: {str(e)}"
-
-    def git_commit_and_push(self, message: str):
-        """Commit and push changes to git repository"""
-        try:
-            # Initialize git if needed (idempotent)
-            subprocess.run(['git', 'init'], check=True)
-
-            # Configure git if not already done
-            try:
-                subprocess.run(['git', 'config', 'user.email', "wallet-education@example.com"], check=True)
-                subprocess.run(['git', 'config', 'user.name', "Wallet Education App"], check=True)
-            except subprocess.CalledProcessError:
-                pass  # Ignore if already configured
-
-            # Add and commit changes
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
-
-            # Push changes
-            subprocess.run(['git', 'push', '--force', 'origin', 'main'], check=True)
-            return True, "Changes committed and pushed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git operation failed: {str(e)}"
+            if self.scanning:
+                self.scanning = False
+                if self._executor:
+                    # Wait for threads to complete
+                    self._executor.shutdown(wait=True)
+                    self._executor = None
+                    self._futures = []
 
     def _scan_worker(self):
         """Worker function for scanning thread."""
@@ -164,24 +135,61 @@ class WalletScanner:
     def _save_to_file(self, wallet_info: Dict):
         """Save wallet with balance to file."""
         try:
-            # Ensure C:\temp directory exists
-            os.makedirs(r"C:\temp", exist_ok=True)
+            # Ensure temp directory exists
+            os.makedirs(os.path.join(os.getcwd(), "temp"), exist_ok=True)
 
-            # Save to C:\temp\wallets.txt with today's date
+            # Save to temp/wallets.txt with today's date
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            with open(r"C:\temp\wallets.txt", 'a') as f:
+            filepath = os.path.join(os.getcwd(), "temp", "wallets.txt")
+
+            with open(filepath, 'a') as f:
                 f.write(f"\n=== Wallet Found at {timestamp} (Created on {BUILD_TIMESTAMP}) ===\n")
                 f.write(f"Address: {wallet_info['address']}\n")
                 f.write(f"Balance: {wallet_info['balance']} BTC\n")
                 f.write(f"Last Transaction: {wallet_info['last_transaction']}\n")
                 f.write("="*40 + "\n")
 
-            # Commit changes to git
-            success, git_message = self.git_commit_and_push(
-                f"Add wallet scan result from {timestamp}"
-            )
-            if not success:
-                logging.warning(f"Git push warning: {git_message}")
+            # Commit changes to git if in a git repository
+            try:
+                subprocess.run(['git', 'add', filepath], check=True)
+                subprocess.run(['git', 'commit', '-m', f"Add wallet scan result from {timestamp}"], check=True)
+                subprocess.run(['git', 'push'], check=True)
+            except subprocess.CalledProcessError as e:
+                logging.warning(f"Git operation warning: {str(e)}")
+            except Exception as e:
+                logging.error(f"Git error: {str(e)}")
 
         except Exception as e:
             logging.error(f"Error saving wallet: {str(e)}")
+
+    def git_commit_changes(self, message: str):
+        """Commit changes to git repository"""
+        try:
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', message], check=True)
+            return True, "Changes committed to git successfully"
+        except subprocess.CalledProcessError as e:
+            return False, f"Git commit failed: {str(e)}"
+
+    def git_commit_and_push(self, message: str):
+        """Commit and push changes to git repository"""
+        try:
+            # Initialize git if needed (idempotent)
+            subprocess.run(['git', 'init'], check=True)
+
+            # Configure git if not already done
+            try:
+                subprocess.run(['git', 'config', 'user.email', "wallet-education@example.com"], check=True)
+                subprocess.run(['git', 'config', 'user.name', "Wallet Education App"], check=True)
+            except subprocess.CalledProcessError:
+                pass  # Ignore if already configured
+
+            # Add and commit changes
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', message], check=True)
+
+            # Push changes
+            subprocess.run(['git', 'push', '--force', 'origin', 'main'], check=True)
+            return True, "Changes committed and pushed to git successfully"
+        except subprocess.CalledProcessError as e:
+            return False, f"Git operation failed: {str(e)}"

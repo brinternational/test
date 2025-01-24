@@ -215,7 +215,7 @@ class WalletFrame(ttk.Frame):
         # Add save location indicator
         save_location = ttk.Label(
             controls,
-            text="Saving wallets to: C:\\temp\\wallets.txt",
+            text=f"Saving wallets to: {os.path.join(os.getcwd(), 'temp', 'wallets.txt')}",
             style="Topic.TLabel"
         )
         save_location.pack(side=tk.LEFT, padx=20)
@@ -370,7 +370,8 @@ class WalletFrame(ttk.Frame):
             self.stats_text.set(
                 f"Total Scanned: {stats['total_scanned']} | "
                 f"With Balance: {stats['wallets_with_balance']} | "
-                f"Rate: {stats['scan_rate']} wallets/min"
+                f"Rate: {stats['scan_rate']} wallets/min | "
+                f"Active Threads: {stats['active_threads']}"
             )
             self.after(1000, self.update_statistics)
 
@@ -394,6 +395,7 @@ class WalletFrame(ttk.Frame):
         try:
             new_count = int(self.thread_spinbox.get())
             self.wallet_scanner.set_thread_count(new_count)
+            self.update_statistics()  # Update UI immediately
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             self.thread_spinbox.set(self.wallet_scanner.thread_count)

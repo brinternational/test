@@ -4,7 +4,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 import random
-import base58
+import base58check as base58  # Changed to base58check for better Bitcoin address handling
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
@@ -134,16 +134,19 @@ class BitcoinUtils:
         # Generate mock public key (in real implementation, this would use secp256k1)
         public_key = hashlib.sha256(private_key).digest()
 
-        # Generate different address formats for education
-        # In real implementation, these would be properly derived using:
-        # - Legacy (P2PKH): Base58Check(hash160(public_key))
-        # - SegWit (P2SH): Base58Check(hash160(redeemScript))
-        # - Native SegWit (P2WPKH): Bech32("bc1" + hash160(public_key))
+        # Generate different address formats
+        public_key_hash = hashlib.new('ripemd160', hashlib.sha256(public_key).digest()).digest()
 
-        mock_hash = hashlib.sha256(public_key).hexdigest()
-        legacy_address = f"1{mock_hash[:32]}"  # P2PKH format
-        segwit_address = f"3{mock_hash[32:64]}"  # P2SH format
-        native_segwit = f"bc1{mock_hash[:32]}"  # Native SegWit format
+        # P2PKH address
+        version_byte = b'\x00'  # mainnet
+        legacy_address = base58.b58encode_check(version_byte + public_key_hash).decode('ascii')
+
+        # P2SH address (mock implementation)
+        script_version = b'\x05'  # mainnet
+        segwit_address = base58.b58encode_check(script_version + public_key_hash).decode('ascii')
+
+        # Native SegWit (mock bech32 implementation)
+        native_segwit = f"bc1{public_key_hash.hex()[:32]}"
 
         # Generate mock transaction history (deterministic based on chain_code)
         last_tx_days = int.from_bytes(hashlib.sha256(chain_code).digest()[:4], 'big') % 365
