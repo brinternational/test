@@ -4,8 +4,12 @@ from datetime import datetime
 import random
 import os
 import subprocess
+import threading
+from queue import Queue
+from concurrent.futures import ThreadPoolExecutor, wait
+import logging
 
-BUILD_TIMESTAMP = datetime.now().strftime("%Y-%m-%d %H:%M:%S") # Added BUILD_TIMESTAMP
+BUILD_TIMESTAMP = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 class WalletScanner:
     def __init__(self):
@@ -13,54 +17,100 @@ class WalletScanner:
         self.wallets_with_balance = []
         self.start_time = None
         self.scanning = False
+        self.thread_count = 1
+        self._executor = None
+        self._futures = []
+        self._lock = threading.Lock()
+        self.wallet_queue = Queue()
+
+    def set_thread_count(self, count: int):
+        """Dynamically adjust the number of scanning threads."""
+        if count < 1:
+            raise ValueError("Thread count must be at least 1")
+
+        with self._lock:
+            if self._executor:
+                # Wait for existing futures if reducing threads
+                if count < self.thread_count:
+                    done_futures = []
+                    remaining_futures = []
+                    for future in self._futures:
+                        if future.done():
+                            done_futures.append(future)
+                        else:
+                            remaining_futures.append(future)
+                    # Keep only the desired number of running futures
+                    self._futures = remaining_futures[:count]
+                    # Remove completed futures
+                    for future in done_futures:
+                        self._futures.remove(future)
+
+                # Shutdown existing executor and create new one
+                self._executor.shutdown(wait=False)
+
+            self.thread_count = count
+            self._executor = ThreadPoolExecutor(max_workers=count)
+
+            # Start new scanning threads if needed
+            if self.scanning:
+                while len(self._futures) < count:
+                    self._futures.append(self._executor.submit(self._scan_worker))
 
     def start_scan(self):
         """Start or resume scanning."""
-        self.start_time = time.time()
-        self.scanning = True
+        with self._lock:
+            self.start_time = time.time()
+            self.scanning = True
+
+            # Initialize thread pool if needed
+            if not self._executor:
+                self.set_thread_count(self.thread_count)
+
+            # Start scanning threads
+            while len(self._futures) < self.thread_count:
+                self._futures.append(self._executor.submit(self._scan_worker))
 
     def stop_scan(self):
         """Stop scanning."""
-        self.scanning = False
+        with self._lock:
+            self.scanning = False
+            if self._executor:
+                # Wait for threads to complete
+                self._executor.shutdown(wait=True)
+                self._executor = None
+                self._futures = []
 
-    def git_commit_changes(self, message: str):
-        """Commit changes to git repository"""
-        try:
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
-            return True, "Changes committed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git commit failed: {str(e)}"
-
-    def git_commit_and_push(self, message: str):
-        """Commit and push changes to git repository"""
-        try:
-            # Initialize git if needed (idempotent)
-            subprocess.run(['git', 'init'], check=True)
-
-            # Configure git if not already done
+    def _scan_worker(self):
+        """Worker function for scanning thread."""
+        while self.scanning:
             try:
-                subprocess.run(['git', 'config', 'user.email', "wallet-education@example.com"], check=True)
-                subprocess.run(['git', 'config', 'user.name', "Wallet Education App"], check=True)
-            except subprocess.CalledProcessError:
-                pass  # Ignore if already configured
+                # Generate random wallet data for demonstration
+                wallet_info = {
+                    'address': f"bc1{os.urandom(20).hex()}",
+                    'balance': random.random() * 0.1,
+                    'last_transaction': datetime.now().strftime("%Y-%m-%d")
+                }
 
-            # Add and commit changes
-            subprocess.run(['git', 'add', '.'], check=True)
-            subprocess.run(['git', 'commit', '-m', message], check=True)
+                with self._lock:
+                    self.total_scanned += 1
+                    if wallet_info['balance'] > 0:
+                        self.wallets_with_balance.append(wallet_info)
+                        self._save_to_file(wallet_info)
 
-            # Push changes
-            subprocess.run(['git', 'push', '--force', 'origin', 'main'], check=True)
-            return True, "Changes committed and pushed to git successfully"
-        except subprocess.CalledProcessError as e:
-            return False, f"Git operation failed: {str(e)}"
+                # Simulate scanning delay
+                time.sleep(0.1)
+
+            except Exception as e:
+                logging.error(f"Scanner worker error: {str(e)}")
+                continue
 
     def add_wallet(self, wallet_info: Dict):
         """Add a wallet to the scan results."""
-        self.total_scanned += 1
-        if wallet_info.get('balance', 0) > 0:
-            self.wallets_with_balance.append(wallet_info)
-            self._save_to_file(wallet_info)
+        with self._lock:
+            self.total_scanned += 1
+            if wallet_info.get('balance', 0) > 0:
+                self.wallets_with_balance.append(wallet_info)
+                self._save_to_file(wallet_info)
 
     def get_scan_rate(self) -> float:
         """Calculate wallets scanned per minute."""
@@ -71,11 +121,13 @@ class WalletScanner:
 
     def get_statistics(self) -> Dict:
         """Get current scanning statistics."""
-        return {
-            'total_scanned': self.total_scanned,
-            'wallets_with_balance': len(self.wallets_with_balance),
-            'scan_rate': round(self.get_scan_rate(), 2)
-        }
+        with self._lock:
+            return {
+                'total_scanned': self.total_scanned,
+                'wallets_with_balance': len(self.wallets_with_balance),
+                'scan_rate': round(self.get_scan_rate(), 2),
+                'active_threads': len(self._futures) if self._futures else 0
+            }
 
     def _save_to_file(self, wallet_info: Dict):
         """Save wallet with balance to file."""
@@ -92,13 +144,5 @@ class WalletScanner:
                 f.write(f"Last Transaction: {wallet_info['last_transaction']}\n")
                 f.write("="*40 + "\n")
 
-            # Commit and push changes to git
-            success, git_message = self.git_commit_and_push(
-                f"Add new wallet at {timestamp}"
-            )
-
-            if not success:
-                print(f"Warning: {git_message}")
-
         except Exception as e:
-            print(f"Error saving wallet: {str(e)}")
+            logging.error(f"Error saving wallet: {str(e)}")

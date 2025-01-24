@@ -220,6 +220,21 @@ class WalletFrame(ttk.Frame):
         )
         save_location.pack(side=tk.LEFT, padx=20)
 
+        # Add thread count control
+        thread_frame = ttk.Frame(controls)
+        thread_frame.pack(side=tk.RIGHT, padx=5)
+
+        ttk.Label(thread_frame, text="Threads:").pack(side=tk.LEFT)
+        self.thread_spinbox = ttk.Spinbox(
+            thread_frame,
+            from_=1,
+            to=16,
+            width=3,
+            command=self.update_thread_count
+        )
+        self.thread_spinbox.set(1)
+        self.thread_spinbox.pack(side=tk.LEFT, padx=5)
+
         # Add educational mode indicator
         self.mode_label = ttk.Label(
             controls,
@@ -373,6 +388,16 @@ class WalletFrame(ttk.Frame):
                 "for learning about Bitcoin wallets and transactions.\n\n"
                 f"Status: {message}"
             )
+
+    def update_thread_count(self):
+        """Update the number of scanning threads."""
+        try:
+            new_count = int(self.thread_spinbox.get())
+            self.wallet_scanner.set_thread_count(new_count)
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+            self.thread_spinbox.set(self.wallet_scanner.thread_count)
+
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
