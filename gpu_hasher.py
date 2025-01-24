@@ -92,39 +92,53 @@ class GPUHasher:
     }
     """
 
-    def __init__(self):
+    def __init__(self, enable_cpu=True, enable_gpu=True, enable_npu=True):
         self.ctx = None
         self.queue = None
         self.program = None
         self.device_type = None
+        self.enable_cpu = enable_cpu
+        self.enable_gpu = enable_gpu
+        self.enable_npu = enable_npu
         self._initialize_accelerator()
 
     def _initialize_accelerator(self):
-        """Initialize OpenCL context with NPU/GPU/CPU priority."""
+        """Initialize OpenCL context based on enabled acceleration preferences."""
         try:
             platform = cl.get_platforms()[0]
+            selected_device = None
 
-            # Try NPU first (usually appears as ACCELERATOR)
-            devices = platform.get_devices(device_type=cl.device_type.ACCELERATOR)
-            if devices:
-                self.device_type = "NPU"
-                logging.info("NPU acceleration detected")
-            else:
-                # Try GPU next
+            # Try NPU first (if enabled)
+            if self.enable_npu:
+                devices = platform.get_devices(device_type=cl.device_type.ACCELERATOR)
+                if devices:
+                    selected_device = devices[0]
+                    self.device_type = "NPU"
+                    logging.info("NPU acceleration selected")
+
+            # Try GPU next (if enabled and NPU not found)
+            if not selected_device and self.enable_gpu:
                 devices = platform.get_devices(device_type=cl.device_type.GPU)
                 if devices:
+                    selected_device = devices[0]
                     self.device_type = "GPU"
-                    logging.info("GPU acceleration detected")
-                else:
-                    # Fall back to CPU
-                    devices = platform.get_devices(device_type=cl.device_type.CPU)
-                    self.device_type = "CPU"
-                    logging.warning("No GPU/NPU found, falling back to CPU for OpenCL")
+                    logging.info("GPU acceleration selected")
 
-            self.ctx = cl.Context(devices)
+            # Fall back to CPU (if enabled and no other device found)
+            if not selected_device and self.enable_cpu:
+                devices = platform.get_devices(device_type=cl.device_type.CPU)
+                if devices:
+                    selected_device = devices[0]
+                    self.device_type = "CPU"
+                    logging.info("CPU acceleration selected")
+
+            if not selected_device:
+                raise RuntimeError("No enabled acceleration methods available")
+
+            self.ctx = cl.Context([selected_device])
             self.queue = cl.CommandQueue(self.ctx)
             self.program = cl.Program(self.ctx, self.KERNEL_CODE).build()
-            logging.info(f"{self.device_type} acceleration initialized on: {devices[0].name}")
+            logging.info(f"{self.device_type} acceleration initialized on: {selected_device.name}")
 
         except Exception as e:
             logging.error(f"Failed to initialize hardware acceleration: {str(e)}")

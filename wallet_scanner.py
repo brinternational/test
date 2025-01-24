@@ -22,9 +22,18 @@ class WalletScanner:
         self._futures = []
         self._lock = threading.Lock()
 
+        # Acceleration preferences
+        self.cpu_enabled = True
+        self.gpu_enabled = True
+        self.npu_enabled = True
+
         # Initialize GPU acceleration if available
         try:
-            self.gpu_hasher = GPUHasher()
+            self.gpu_hasher = GPUHasher(
+                enable_cpu=self.cpu_enabled,
+                enable_gpu=self.gpu_enabled,
+                enable_npu=self.npu_enabled
+            )
             logging.info(f"GPU acceleration enabled: {self.gpu_hasher.get_device_info()}")
         except Exception as e:
             logging.warning(f"GPU acceleration disabled: {str(e)}")
@@ -142,7 +151,7 @@ class WalletScanner:
                 if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.7:  # More aggressive threshold
                     # Pre-allocate batch for better memory efficiency
                     local_batch = []
-                    local_batch_size = min(self.BATCH_SIZE, 
+                    local_batch_size = min(self.BATCH_SIZE,
                                              self.wallet_queue.maxsize - self.wallet_queue.qsize())
 
                     # Bulk generate wallets
@@ -277,11 +286,11 @@ class WalletScanner:
                 avg_rate = 0
 
             return {
-                'total_scanned': f"{self.shared_total.value:,}",  # Added comma formatting
-                'wallets_with_balance': f"{self.shared_balance_count.value:,}",  # Added comma formatting
-                'scan_rate': f"{round(avg_rate, 1):,}",  # Added comma formatting
+                'total_scanned': f"{self.shared_total.value:,}",
+                'wallets_with_balance': f"{self.shared_balance_count.value:,}",
+                'scan_rate': f"{avg_rate:,.1f}",
                 'active_threads': len([f for f in self._futures[1:] if not f.done()]),
-                'queue_size': f"{self.wallet_queue.qsize() * self.BATCH_SIZE:,}"  # Added comma formatting
+                'queue_size': f"{self.wallet_queue.qsize() * self.BATCH_SIZE:,}"
             }
 
     def set_thread_count(self, count: int):
@@ -312,3 +321,21 @@ class WalletScanner:
                 )
         except Exception as e:
             logging.error(f"Error saving wallet to file: {str(e)}")
+
+    def set_acceleration_preferences(self, cpu_enabled: bool, gpu_enabled: bool, npu_enabled: bool):
+        """Update acceleration preferences and reinitialize hardware acceleration."""
+        self.cpu_enabled = cpu_enabled
+        self.gpu_enabled = gpu_enabled
+        self.npu_enabled = npu_enabled
+
+        # Reinitialize GPU hasher with new preferences
+        try:
+            self.gpu_hasher = GPUHasher(
+                enable_cpu=self.cpu_enabled,
+                enable_gpu=self.gpu_enabled,
+                enable_npu=self.npu_enabled
+            )
+            logging.info(f"Acceleration updated: {self.gpu_hasher.get_device_info()}")
+        except Exception as e:
+            logging.warning(f"Hardware acceleration disabled: {str(e)}")
+            self.gpu_hasher = None

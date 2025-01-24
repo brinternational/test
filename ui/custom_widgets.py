@@ -212,6 +212,36 @@ class WalletFrame(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(fill=tk.X, padx=20, pady=20)
 
+        # Add acceleration control frame
+        accel_frame = ttk.LabelFrame(controls, text="Hardware Acceleration")
+        accel_frame.pack(side=tk.LEFT, padx=5)
+
+        # Acceleration checkboxes
+        self.cpu_var = tk.BooleanVar(value=True)  # CPU always available
+        self.gpu_var = tk.BooleanVar(value=True)
+        self.npu_var = tk.BooleanVar(value=True)
+
+        ttk.Checkbutton(
+            accel_frame,
+            text="CPU",
+            variable=self.cpu_var,
+            command=self.update_acceleration
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Checkbutton(
+            accel_frame,
+            text="GPU",
+            variable=self.gpu_var,
+            command=self.update_acceleration
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Checkbutton(
+            accel_frame,
+            text="NPU",
+            variable=self.npu_var,
+            command=self.update_acceleration
+        ).pack(side=tk.LEFT, padx=5)
+
         # Add save location indicator
         save_location = ttk.Label(
             controls,
@@ -307,9 +337,9 @@ class WalletFrame(ttk.Frame):
         if self.wallet_scanner.scanning:
             stats = self.wallet_scanner.get_statistics()
             self.stats_text.set(
-                f"Total Scanned: {stats['total_scanned']:,} | "
+                f"Total Scanned: {stats['total_scanned']} | "
                 f"With Balance: {stats['wallets_with_balance']} | "
-                f"Rate: {stats['scan_rate']:.1f} wallets/min | "
+                f"Rate: {stats['scan_rate']} wallets/min | "
                 f"Active Threads: {stats['active_threads']} | "
                 f"Queue: {stats['queue_size']}"
             )
@@ -330,6 +360,29 @@ class WalletFrame(ttk.Frame):
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             self.thread_spinbox.set(self.wallet_scanner.thread_count)
+
+    def update_acceleration(self):
+        """Update hardware acceleration preferences."""
+        # Ensure at least one acceleration method is enabled
+        if not any([self.cpu_var.get(), self.gpu_var.get(), self.npu_var.get()]):
+            self.cpu_var.set(True)  # Force CPU if all are disabled
+            messagebox.showwarning(
+                "Acceleration Warning",
+                "At least one acceleration method must be enabled. CPU will remain enabled."
+            )
+
+        # Update scanner preferences
+        self.wallet_scanner.set_acceleration_preferences(
+            cpu_enabled=self.cpu_var.get(),
+            gpu_enabled=self.gpu_var.get(),
+            npu_enabled=self.npu_var.get()
+        )
+
+        # Restart scanning if active
+        if self.wallet_scanner.scanning:
+            self.wallet_scanner.stop_scan()
+            self.wallet_scanner.start_scan()
+
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
