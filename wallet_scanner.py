@@ -103,22 +103,29 @@ class WalletScanner:
                     self.scanning = True
                     self.start_time = time.time()
 
-                    # Shutdown existing executors if any
-                    self._shutdown_executors()
+                    # Shutdown existing executors
+                    if self._scan_executor:
+                        self._scan_executor.shutdown(wait=False)
+                        self._scan_executor = None
+                    if self._gen_executor:
+                        self._gen_executor.shutdown(wait=False)
+                        self._gen_executor = None
+
+                    # Clear futures list
+                    self._futures = []
 
                     # Create separate executors for generator and scanners
                     self._gen_executor = ThreadPoolExecutor(max_workers=1)
                     self._scan_executor = ThreadPoolExecutor(max_workers=self.thread_count)
 
-                    # Clear futures list
-                    self._futures = []
-
-                    # Start generator thread
-                    self._futures.append(self._gen_executor.submit(self._wallet_generator_worker))
+                    # Start generator thread first
+                    gen_future = self._gen_executor.submit(self._wallet_generator_worker)
+                    self._futures = [gen_future]  # Generator is always first
 
                     # Start scan workers
                     for _ in range(self.thread_count):
-                        self._futures.append(self._scan_executor.submit(self._scan_worker))
+                        scan_future = self._scan_executor.submit(self._scan_worker)
+                        self._futures.append(scan_future)
 
                     logging.info(f"Started {self.thread_count} scan workers plus 1 generator")
 
