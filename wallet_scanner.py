@@ -80,16 +80,19 @@ class WalletScanner:
                 combined_data = version_bytes[i] + entropies[i][:20] + checksum[:4]
                 address = base58.b58encode(combined_data).decode('utf-8')
 
-                # Check balance (using existing method)
-                addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
-                if addr_hash % 100000 == 0:
-                    balance = float(addr_hash % 1000) / 10000
-                    results.append({
-                        'seed_phrase': wallet_data['seed_phrase'],
-                        'address': address,
-                        'balance': balance,
-                        'found_at': wallet_data['timestamp']
-                    })
+                # Much stricter balance checking simulation
+                addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest(), 'big')
+                if addr_hash % 10000000 == 0:  # Much rarer occurrence
+                    # Generate a very small balance (max 0.001 BTC) in rare cases
+                    balance = float(addr_hash % 100) / 100000
+                    if balance > 0:
+                        logging.info(f"[Simulation] Found wallet with balance: {balance} BTC")
+                        results.append({
+                            'seed_phrase': wallet_data['seed_phrase'],
+                            'address': address,
+                            'balance': balance,
+                            'found_at': wallet_data['timestamp']
+                        })
 
             return results
 
@@ -117,17 +120,20 @@ class WalletScanner:
                     address = base58.b58encode(combined + checksum).decode('utf-8')
                     chunk_addresses.append(address)
 
-                # Check balances for chunk
+                # Check balances for chunk with stricter criteria
                 for wallet_data, address in zip(chunk, chunk_addresses):
-                    addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
-                    if addr_hash % 100000 == 0:
-                        balance = float(addr_hash % 1000) / 10000
-                        results.append({
-                            'seed_phrase': wallet_data['seed_phrase'],
-                            'address': address,
-                            'balance': balance,
-                            'found_at': wallet_data['timestamp']
-                        })
+                    addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest(), 'big')
+                    if addr_hash % 10000000 == 0:  # Much rarer occurrence
+                        # Generate a very small balance (max 0.001 BTC) in rare cases
+                        balance = float(addr_hash % 100) / 100000
+                        if balance > 0:
+                            logging.info(f"[Simulation] Found wallet with balance: {balance} BTC")
+                            results.append({
+                                'seed_phrase': wallet_data['seed_phrase'],
+                                'address': address,
+                                'balance': balance,
+                                'found_at': wallet_data['timestamp']
+                            })
 
             return results
 
@@ -179,10 +185,10 @@ class WalletScanner:
         """Optimized batch balance checking."""
         results = []
         for address in addresses:
-            addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
-            # Very rare chance of having a balance
-            if addr_hash % 100000 == 0:
-                balance = float(addr_hash % 1000) / 10000
+            addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest(), 'big')
+            # Much stricter balance simulation
+            if addr_hash % 10000000 == 0:  # Very rare chance of having a balance
+                balance = float(addr_hash % 100) / 100000  # Max 0.001 BTC
                 results.append(balance)
             else:
                 results.append(0.0)
