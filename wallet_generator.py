@@ -15,26 +15,33 @@ class WalletGenerator:
     @staticmethod
     def entropy_to_words(entropy: bytes) -> List[str]:
         """Convert entropy to BIP39 seed phrase."""
-        # Convert entropy to binary
-        binary = bin(int.from_bytes(entropy, 'big'))[2:].zfill(len(entropy) * 8)
+        try:
+            # Convert entropy to binary
+            binary = bin(int.from_bytes(entropy, 'big'))[2:].zfill(len(entropy) * 8)
 
-        # Create checksum
-        checksum = bin(int.from_bytes(
-            hashlib.sha256(entropy).digest(), 'big'))[2:].zfill(256)[:len(entropy) * 8 // 32]
+            # Create checksum
+            checksum = bin(int.from_bytes(
+                hashlib.sha256(entropy).digest(), 'big'))[2:].zfill(256)[:len(entropy) * 8 // 32]
 
-        # Combine entropy and checksum
-        binary_with_checksum = binary + checksum
-        words = []
+            # Combine entropy and checksum
+            binary_with_checksum = binary + checksum
+            words = []
 
-        # Split into 11-bit chunks and convert to words
-        for i in range(0, len(binary_with_checksum), 11):
-            index = int(binary_with_checksum[i:i+11], 2)
-            if index < len(WalletGenerator.BIP39_WORDS):
-                words.append(WalletGenerator.BIP39_WORDS[index])
-            else:
-                raise ValueError(f"Invalid word index: {index}")
+            # Split into 11-bit chunks and convert to words
+            for i in range(0, len(binary_with_checksum), 11):
+                chunk = binary_with_checksum[i:i+11]
+                if len(chunk) == 11:  # Ensure we have a complete 11-bit chunk
+                    index = int(chunk, 2)
+                    if 0 <= index < len(WalletGenerator.BIP39_WORDS):
+                        words.append(WalletGenerator.BIP39_WORDS[index])
+                    else:
+                        raise ValueError(f"Invalid word index: {index}")
+                else:
+                    raise ValueError(f"Incomplete bit chunk: {len(chunk)} bits")
 
-        return words
+            return words
+        except Exception as e:
+            raise ValueError(f"Error generating seed phrase: {str(e)}")
 
     @staticmethod
     def generate_seed_phrase(word_count: int = 12) -> Tuple[List[str], bytes]:
