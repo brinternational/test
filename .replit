@@ -28,7 +28,8 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "DISPLAY=:0 python main.py"
+args = "python main.py"
+waitForPort = 5000
 
 [[workflows.workflow]]
 name = "Test Bitcoin Node"
@@ -45,7 +46,7 @@ task = "shell.exec"
 args = "python test_node.py"
 
 [deployment]
-run = ["sh", "-c", "DISPLAY=:0 python main.py"]
+run = ["sh", "-c", "python main.py"]
 
 [nix]
 channel = "stable-24_05"

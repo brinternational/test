@@ -205,6 +205,7 @@ class WalletFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.wallet_scanner = WalletScanner()
+        self.instance_info = self.wallet_scanner.get_instance_info()
         self.setup_ui()
 
     def setup_ui(self):
@@ -229,13 +230,27 @@ class WalletFrame(ttk.Frame):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.grid_rowconfigure(0, weight=1)
 
+        # Instance information frame
+        instance_frame = ttk.LabelFrame(scrollable_frame, text="Instance Information")
+        instance_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Label(
+            instance_frame,
+            text=f"Instance ID: {self.instance_info['instance_id']} | "
+                 f"Instance #: {self.instance_info['instance_number']} | "
+                 f"File: {self.instance_info['wallet_file']} | "
+                 f"CPU Threads: {self.instance_info['cpu_threads']} | "
+                 f"GPU: {'Enabled' if self.instance_info['gpu_enabled'] else 'Disabled'}",
+            style='Info.TLabel'
+        ).pack(padx=5, pady=5)
+
         # Title and mode indicator in header frame
         header = ttk.Frame(scrollable_frame)
         header.pack(fill=tk.X, padx=10, pady=5)
 
         title = ttk.Label(
             header,
-            text="Bitcoin Wallet Scanner",
+            text=f"Bitcoin Wallet Scanner (Instance: {self.instance_info['instance_id']})",
             style="Title.TLabel"
         )
         title.pack(side=tk.LEFT)
@@ -243,7 +258,7 @@ class WalletFrame(ttk.Frame):
         # Remove mode label since we don't need it
         self.mode_label = ttk.Label(
             header,
-            text="",  # Remove text completely
+            text="",
             style="Topic.TLabel"
         )
         self.mode_label.pack(side=tk.RIGHT)
@@ -423,8 +438,6 @@ class WalletFrame(ttk.Frame):
         if self.wallet_scanner.scanning:
             self.wallet_scanner.stop_scan()
             self.wallet_scanner.start_scan()
-
-
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):

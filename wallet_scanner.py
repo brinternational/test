@@ -12,10 +12,20 @@ from wallet_generator import WalletGenerator
 import base58
 import hashlib
 from gpu_hasher import GPUHasher
+import uuid
 
 class WalletScanner:
+    # Class variable to track instance count
+    _instance_counter = multiprocessing.Value('i', 0)
+
     def __init__(self):
         self.scanning = False
+        # Generate unique instance ID and number
+        self.instance_id = str(uuid.uuid4())[:8]
+        with WalletScanner._instance_counter.get_lock():
+            WalletScanner._instance_counter.value += 1
+            self.instance_number = WalletScanner._instance_counter.value
+
         # Get physical core count using multiprocessing
         self.cpu_thread_count = max(multiprocessing.cpu_count() // 2, 1)  # Use half of logical cores
         self.gpu_thread_count = 256
@@ -29,9 +39,9 @@ class WalletScanner:
         self.gpu_enabled = True
         self.npu_enabled = True
 
-        # Optimize batch sizes based on core count
-        self.CPU_BATCH_SIZE = max(1000 * self.cpu_thread_count, 5000)
-        self.GPU_BATCH_SIZE = 10000
+        # Adjust batch sizes for multi-instance operation
+        self.CPU_BATCH_SIZE = max(1000 * (self.cpu_thread_count // 2), 2500)  # Reduced for multi-instance
+        self.GPU_BATCH_SIZE = 5000  # Reduced for multi-instance
 
         # Initialize GPU acceleration if available
         try:
@@ -41,13 +51,13 @@ class WalletScanner:
                 enable_npu=self.npu_enabled,
                 gpu_threads=self.gpu_thread_count
             )
-            logging.info(f"GPU acceleration enabled: {self.gpu_hasher.get_device_info()}")
+            logging.info(f"Instance {self.instance_id}: GPU acceleration enabled: {self.gpu_hasher.get_device_info()}")
         except Exception as e:
-            logging.warning(f"GPU acceleration disabled: {str(e)}")
+            logging.warning(f"Instance {self.instance_id}: GPU acceleration disabled: {str(e)}")
             self.gpu_hasher = None
 
-        # Queue configurations with optimized sizes
-        self.wallet_queue = Queue(maxsize=self.CPU_BATCH_SIZE * 4)
+        # Queue configurations with optimized sizes for multi-instance
+        self.wallet_queue = Queue(maxsize=self.CPU_BATCH_SIZE * 2)  # Reduced queue size
         self.result_queue = multiprocessing.Queue()
 
         # Shared counters for statistics
@@ -63,23 +73,53 @@ class WalletScanner:
         self.last_cpu_time = None
         self.last_gpu_time = None
 
-        # Ensure wallet save directory exists
+        # Save directory configuration
         self.save_dir = os.path.join(os.path.expanduser("~"), "temp")
         self._setup_save_directory()
 
     def _setup_save_directory(self):
-        """Setup wallet directory with proper error handling."""
+        """Setup wallet directory."""
         try:
             os.makedirs(self.save_dir, exist_ok=True)
-            logging.info(f"Wallet save directory created/verified: {self.save_dir}")
+            logging.info(f"Instance {self.instance_id}: Using wallet directory: {self.save_dir}")
         except Exception as e:
-            logging.error(f"Failed to create wallet directory {self.save_dir}: {str(e)}")
+            logging.error(f"Instance {self.instance_id}: Failed to create directory {self.save_dir}: {str(e)}")
             self.save_dir = os.path.join(os.getcwd(), "wallets")
             os.makedirs(self.save_dir, exist_ok=True)
-            logging.info(f"Created fallback wallet directory: {self.save_dir}")
+            logging.info(f"Instance {self.instance_id}: Using fallback directory: {self.save_dir}")
+
+    def _get_wallet_filename(self):
+        """Get the wallet filename for this instance."""
+        return os.path.join(self.save_dir, f"wallets{self.instance_number}.txt")
+
+    def _save_to_file(self, wallet_info: Dict):
+        """Save wallet to numbered file."""
+        try:
+            filepath = self._get_wallet_filename()
+            with open(filepath, 'a') as f:
+                f.write(
+                    f"\n=== Wallet Found at {wallet_info['found_at']} ===\n"
+                    f"Seed Phrase: {wallet_info['seed_phrase']}\n"
+                    f"Address: {wallet_info['address']}\n"
+                    f"Balance: {wallet_info['balance']} BTC\n"
+                    f"{'=' * 50}\n"
+                )
+        except Exception as e:
+            logging.error(f"Instance {self.instance_id}: Error saving wallet to file: {str(e)}")
+
+    def get_instance_info(self) -> Dict:
+        """Get information about this scanner instance."""
+        return {
+            'instance_id': self.instance_id,
+            'instance_number': self.instance_number,
+            'wallet_file': f"wallets{self.instance_number}.txt",
+            'cpu_threads': self.cpu_thread_count,
+            'gpu_enabled': bool(self.gpu_hasher),
+            'batch_size': self.CPU_BATCH_SIZE
+        }
 
     def _set_process_priority(self):
-        """Set process priority and affinity using native Windows API."""
+        """Set process priority and affinity for multi-instance support."""
         try:
             if os.name == 'nt':  # Windows
                 import ctypes
@@ -88,40 +128,39 @@ class WalletScanner:
                 # Get process handle
                 process = ctypes.windll.kernel32.GetCurrentProcess()
 
-                # Set process priority to HIGH_PRIORITY_CLASS
+                # Set process priority to ABOVE_NORMAL_CLASS for multi-instance
                 ctypes.windll.kernel32.SetPriorityClass(process, 0x00008000)  # HIGH_PRIORITY_CLASS
 
                 # Get system info for CPU count
                 system_info = ctypes.wintypes.SYSTEM_INFO()
                 ctypes.windll.kernel32.GetSystemInfo(ctypes.byref(system_info))
 
-                # Calculate processor mask to use all available cores
-                processor_mask = (1 << system_info.dwNumberOfProcessors) - 1
+                # For multi-instance, use half of available cores
+                usable_cores = max(system_info.dwNumberOfProcessors // 2, 1)
+                processor_mask = ((1 << usable_cores) - 1)
 
-                # Set process affinity mask to use all cores
+                # Set process affinity mask to use allocated cores
                 ctypes.windll.kernel32.SetProcessAffinityMask(process, processor_mask)
 
-                logging.info(f"Process priority set to HIGH_PRIORITY_CLASS with full core affinity")
-                logging.info(f"Using {system_info.dwNumberOfProcessors} processor cores")
+                logging.info(f"Instance {self.instance_id}: Using {usable_cores} of {system_info.dwNumberOfProcessors} cores")
 
-                # Update thread count based on actual core count
-                self.cpu_thread_count = system_info.dwNumberOfProcessors
-                # Increase batch size for better CPU utilization
-                self.CPU_BATCH_SIZE = max(2000 * self.cpu_thread_count, 10000)
+                # Update thread count for multi-instance operation
+                self.cpu_thread_count = usable_cores
+                self.CPU_BATCH_SIZE = max(1000 * self.cpu_thread_count, 2500)
 
             else:  # Non-Windows systems
-                os.nice(0)  # Reset to normal priority
-                self.cpu_thread_count = max(multiprocessing.cpu_count() - 1, 1)
+                os.nice(10)  # Lower priority for multi-instance support
+                self.cpu_thread_count = max(multiprocessing.cpu_count() // 4, 1)  # Use quarter of cores
 
         except Exception as e:
-            logging.warning(f"Failed to set process priority: {str(e)}")
-            self.cpu_thread_count = max(multiprocessing.cpu_count() // 2, 1)
+            logging.warning(f"Instance {self.instance_id}: Failed to set process priority: {str(e)}")
+            self.cpu_thread_count = max(multiprocessing.cpu_count() // 4, 1)
 
     def _process_initializer(self):
         """Initialize worker process with optimized settings."""
         self._set_process_priority()
-        threading.current_thread().name = f"WalletScanner-{os.getpid()}"
-        logging.info(f"Worker process {os.getpid()} initialized")
+        threading.current_thread().name = f"WalletScanner-{self.instance_id}-{os.getpid()}"
+        logging.info(f"Instance {self.instance_id}: Worker process {os.getpid()} initialized")
 
     def _process_batch_gpu(self, batch: List[Dict]) -> List[Dict]:
         """Process wallets using GPU acceleration."""
@@ -149,7 +188,7 @@ class WalletScanner:
                     # Generate a very small balance (max 0.001 BTC) in rare cases
                     balance = float(addr_hash % 100) / 100000
                     if balance > 0:
-                        logging.info(f"[Simulation] Found wallet with balance: {balance} BTC")
+                        logging.info(f"Instance {self.instance_id}: [Simulation] Found wallet with balance: {balance} BTC")
                         results.append({
                             'seed_phrase': wallet_data['seed_phrase'],
                             'address': address,
@@ -160,7 +199,7 @@ class WalletScanner:
             return results
 
         except Exception as e:
-            logging.error(f"Error in GPU batch processing: {str(e)}")
+            logging.error(f"Instance {self.instance_id}: Error in GPU batch processing: {str(e)}")
             # Fallback to CPU processing
             return self._process_batch_cpu(batch)
 
@@ -190,7 +229,7 @@ class WalletScanner:
                         # Generate a very small balance (max 0.001 BTC) in rare cases
                         balance = float(addr_hash % 100) / 100000
                         if balance > 0:
-                            logging.info(f"[Simulation] Found wallet with balance: {balance} BTC")
+                            logging.info(f"Instance {self.instance_id}: [Simulation] Found wallet with balance: {balance} BTC")
                             results.append({
                                 'seed_phrase': wallet_data['seed_phrase'],
                                 'address': address,
@@ -201,7 +240,7 @@ class WalletScanner:
             return results
 
         except Exception as e:
-            logging.error(f"Error processing batch: {str(e)}")
+            logging.error(f"Instance {self.instance_id}: Error processing batch: {str(e)}")
             return []
 
     def _process_batch(self, batch: List[Dict]) -> List[Dict]:
@@ -216,7 +255,7 @@ class WalletScanner:
 
     def _wallet_generator_worker(self):
         """Generate wallets with improved batching."""
-        logging.info("Generator worker started")
+        logging.info(f"Instance {self.instance_id}: Generator worker started")
         local_batch = []
 
         while self.scanning:
@@ -244,7 +283,7 @@ class WalletScanner:
                 else:
                     time.sleep(0.0001)  # Minimal sleep
             except Exception as e:
-                logging.error(f"Generator worker error: {str(e)}")
+                logging.error(f"Instance {self.instance_id}: Generator worker error: {str(e)}")
                 continue
 
     @staticmethod
@@ -263,7 +302,7 @@ class WalletScanner:
 
     def _scan_worker(self):
         """Worker with separate CPU rate tracking."""
-        logging.info("CPU Scan worker started")
+        logging.info(f"Instance {self.instance_id}: CPU Scan worker started")
         while self.scanning:
             try:
                 batch = self.wallet_queue.get(timeout=0.01)
@@ -290,12 +329,12 @@ class WalletScanner:
             except Empty:
                 time.sleep(0.0001)
             except Exception as e:
-                logging.error(f"CPU Scanner worker error: {str(e)}")
+                logging.error(f"Instance {self.instance_id}: CPU Scanner worker error: {str(e)}")
                 continue
 
     def _gpu_scan_worker(self):
         """Worker with separate GPU rate tracking."""
-        logging.info("GPU Scan worker started")
+        logging.info(f"Instance {self.instance_id}: GPU Scan worker started")
         while self.scanning:
             try:
                 batch = self.wallet_queue.get(timeout=0.01)
@@ -322,7 +361,7 @@ class WalletScanner:
             except Empty:
                 time.sleep(0.0001)
             except Exception as e:
-                logging.error(f"GPU Scanner worker error: {str(e)}")
+                logging.error(f"Instance {self.instance_id}: GPU Scanner worker error: {str(e)}")
                 continue
 
 
@@ -331,9 +370,9 @@ class WalletScanner:
         try:
             with self._lock:
                 if not self.scanning:
-                    logging.info(f"Starting scan with {self.cpu_thread_count} CPU cores")
+                    logging.info(f"Instance {self.instance_id}: Starting scan with {self.cpu_thread_count} CPU cores")
                     if self.gpu_enabled and self.gpu_hasher:
-                        logging.info(f"GPU enabled with {self.gpu_thread_count} threads")
+                        logging.info(f"Instance {self.instance_id}: GPU enabled with {self.gpu_thread_count} threads")
 
                     self.scanning = True
                     self.start_time = time.time()
@@ -387,7 +426,7 @@ class WalletScanner:
                         self._futures.append(gpu_future)
 
         except Exception as e:
-            logging.error(f"Error starting scan: {str(e)}")
+            logging.error(f"Instance {self.instance_id}: Error starting scan: {str(e)}")
             self.scanning = False
             self._cleanup_executors()
             raise
@@ -405,11 +444,11 @@ class WalletScanner:
         """Stop scanning safely."""
         with self._lock:
             if self.scanning:
-                logging.info("Stopping scan...")
+                logging.info(f"Instance {self.instance_id}: Stopping scan...")
                 self.scanning = False
                 self._cleanup_executors()
                 self._futures = []
-                logging.info("Scan stopped")
+                logging.info(f"Instance {self.instance_id}: Scan stopped")
 
     def get_statistics(self):
         """Get detailed statistics including separate CPU and GPU rates."""
@@ -448,28 +487,13 @@ class WalletScanner:
                 # Scale GPU threads based on CPU thread count but keep it reasonable
                 self.gpu_thread_count = min(count * 64, 1024)  # Max 1024 GPU threads
                 self.gpu_hasher.set_gpu_threads(self.gpu_thread_count)
-                logging.info(f"GPU threads adjusted to {self.gpu_thread_count}")
+                logging.info(f"Instance {self.instance_id}: GPU threads adjusted to {self.gpu_thread_count}")
 
-            logging.info(f"CPU thread count changed from {old_count} to {self.cpu_thread_count}")
+            logging.info(f"Instance {self.instance_id}: CPU thread count changed from {old_count} to {self.cpu_thread_count}")
 
             if self.scanning:
                 self.stop_scan()
                 self.start_scan()
-
-    def _save_to_file(self, wallet_info: Dict):
-        """Save wallet efficiently."""
-        try:
-            filepath = os.path.join(self.save_dir, "wallets.txt")
-            with open(filepath, 'a') as f:
-                f.write(
-                    f"\n=== Wallet Found at {wallet_info['found_at']} ===\n"
-                    f"Seed Phrase: {wallet_info['seed_phrase']}\n"
-                    f"Address: {wallet_info['address']}\n"
-                    f"Balance: {wallet_info['balance']} BTC\n"
-                    f"{'=' * 50}\n"
-                )
-        except Exception as e:
-            logging.error(f"Error saving wallet to file: {str(e)}")
 
     def set_acceleration_preferences(self, cpu_enabled: bool, gpu_enabled: bool, npu_enabled: bool):
         """Update acceleration preferences and reinitialize hardware acceleration."""
@@ -484,7 +508,18 @@ class WalletScanner:
                 enable_gpu=self.gpu_enabled,
                 enable_npu=self.npu_enabled
             )
-            logging.info(f"Acceleration updated: {self.gpu_hasher.get_device_info()}")
+            logging.info(f"Instance {self.instance_id}: Acceleration updated: {self.gpu_hasher.get_device_info()}")
         except Exception as e:
-            logging.warning(f"Hardware acceleration disabled: {str(e)}")
+            logging.warning(f"Instance {self.instance_id}: Hardware acceleration disabled: {str(e)}")
             self.gpu_hasher = None
+
+    def get_instance_info(self) -> Dict:
+        """Get information about this scanner instance."""
+        return {
+            'instance_id': self.instance_id,
+            'instance_number': self.instance_number,
+            'wallet_file': f"wallets{self.instance_number}.txt",
+            'cpu_threads': self.cpu_thread_count,
+            'gpu_enabled': bool(self.gpu_hasher),
+            'batch_size': self.CPU_BATCH_SIZE
+        }
