@@ -31,6 +31,7 @@ class WalletScanner:
         # Separate rate tracking for CPU and GPU
         self.cpu_scan_rates = deque(maxlen=10)
         self.gpu_scan_rates = deque(maxlen=10)
+        self.scan_rates = deque(maxlen=10)  # Combined rates for compatibility
         self.cpu_processed = multiprocessing.Value('i', 0)
         self.gpu_processed = multiprocessing.Value('i', 0)
         self.last_cpu_time = None
@@ -286,7 +287,9 @@ class WalletScanner:
 
                     self.scanning = True
                     self.start_time = time.time()
-                    self.scan_rates.clear()
+                    self.cpu_scan_rates.clear()
+                    self.gpu_scan_rates.clear()
+                    self.scan_rates.clear()  # Clear combined rates
 
                     self._cleanup_executors()
 
