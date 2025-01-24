@@ -1,22 +1,14 @@
 import time
-from typing import Dict, List
+from typing import Dict
 from datetime import datetime
 import random
 import os
 import threading
-from queue import Queue
+from queue import Queue, Empty
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from wallet_generator import WalletGenerator #Potentially needs to be replaced with BitcoinUtils
-#import subprocess # Removed as git functionality is not included in edited code
-
-# Placeholder for BitcoinUtils - Replace with actual implementation
-class BitcoinUtils:
-    @staticmethod
-    def derive_addresses(seed):
-        #Replace with actual address derivation logic
-        return {'legacy_address': 'test_legacy', 'segwit_address': 'test_segwit', 'native_segwit': 'test_native', 'balance': random.randint(0,10)}
-
+from wallet_generator import WalletGenerator
+import base58
 
 class WalletScanner:
     def __init__(self):
@@ -28,28 +20,27 @@ class WalletScanner:
         self._executor = None
         self._futures = []
         self._lock = threading.Lock()
-        self.wallet_queue = Queue(maxsize=1000)  # Buffer for generated wallets
+        self.wallet_queue = Queue(maxsize=10000)  # Increased buffer size for faster processing
 
     def _wallet_generator_worker(self):
         """Continuously generate new wallets and add to queue."""
         while self.scanning:
             try:
-                if self.wallet_queue.qsize() < 1000:  # Keep queue filled
+                if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.9:  # Keep queue 90% filled
                     # Generate random entropy for new seed phrase
-                    word_count = 12  # Can be adjusted to 15, 18, 21, or 24
+                    word_count = 12  # Standard BIP39 length
                     words, entropy = WalletGenerator.generate_seed_phrase(word_count)
 
-                    # Derive addresses from seed
-                    addresses = BitcoinUtils.derive_addresses(entropy)
-
+                    # Create wallet data
                     wallet_data = {
                         'seed_phrase': ' '.join(words),
-                        'addresses': addresses
+                        'entropy': entropy,
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
 
                     self.wallet_queue.put(wallet_data)
                 else:
-                    time.sleep(0.1)  # Prevent CPU thrashing when queue is full
+                    time.sleep(0.01)  # Reduced sleep time for faster generation
             except Exception as e:
                 logging.error(f"Generator worker error: {str(e)}")
                 continue
@@ -58,33 +49,32 @@ class WalletScanner:
         """Worker function for scanning thread."""
         while self.scanning:
             try:
-                # Get next wallet from queue
+                # Get next wallet from queue with short timeout
                 try:
-                    wallet_data = self.wallet_queue.get(timeout=1)
-                except Queue.Empty:
+                    wallet_data = self.wallet_queue.get(timeout=0.1)
+                except Empty:
                     continue
 
-                # Check balances
-                addresses = wallet_data['addresses']
-                has_balance = False
-                total_balance = 0.0
+                # Process wallet data
+                entropy = wallet_data['entropy']
 
-                # Check each address type
-                for addr_type in ['legacy_address', 'segwit_address', 'native_segwit']:
-                    if addr_type in addresses:
-                        balance = float(addresses.get('balance', 0))
-                        if balance > 0:
-                            has_balance = True
-                            total_balance += balance
+                # Basic address generation (for educational purposes)
+                version_byte = b'\x00'  # mainnet
+                combined = version_byte + entropy[:20]  # Use first 20 bytes for demo
+                checksum = self.generate_checksum(combined)
+                address = base58.b58encode(combined + checksum).decode('utf-8')
+
+                # Mock balance check (random for demo)
+                balance = random.randint(0, 100000) / 100000000.0
 
                 with self._lock:
                     self.total_scanned += 1
-                    if has_balance:
+                    if balance > 0:
                         wallet_info = {
                             'seed_phrase': wallet_data['seed_phrase'],
-                            'addresses': addresses,
-                            'total_balance': total_balance,
-                            'found_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            'address': address,
+                            'balance': balance,
+                            'found_at': wallet_data['timestamp']
                         }
                         self.wallets_with_balance.append(wallet_info)
                         self._save_to_file(wallet_info)
@@ -93,12 +83,18 @@ class WalletScanner:
                 logging.error(f"Scanner worker error: {str(e)}")
                 continue
 
+    @staticmethod
+    def generate_checksum(payload: bytes) -> bytes:
+        """Generate double SHA256 checksum."""
+        import hashlib
+        return hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+
     def start_scan(self):
         """Start or resume scanning."""
         with self._lock:
             if not self.scanning:
-                self.start_time = time.time()
                 self.scanning = True
+                self.start_time = time.time()
 
                 # Initialize thread pool if needed
                 if not self._executor:
@@ -120,21 +116,6 @@ class WalletScanner:
                     self._executor.shutdown(wait=True)
                     self._executor = None
                     self._futures = []
-
-    def add_wallet(self, wallet_info: Dict):
-        """Add a wallet to the scan results."""
-        with self._lock:
-            self.total_scanned += 1
-            if wallet_info.get('balance', 0) > 0:
-                self.wallets_with_balance.append(wallet_info)
-                self._save_to_file(wallet_info)
-
-    def get_scan_rate(self) -> float:
-        """Calculate wallets scanned per minute."""
-        if not self.start_time or not self.scanning:
-            return 0.0
-        elapsed_minutes = (time.time() - self.start_time) / 60
-        return self.total_scanned / elapsed_minutes if elapsed_minutes > 0 else 0
 
     def get_statistics(self):
         """Get current scanning statistics."""
@@ -175,11 +156,8 @@ class WalletScanner:
             with open(filepath, 'a') as f:
                 f.write(f"\n=== Wallet Found at {wallet_info['found_at']} ===\n")
                 f.write(f"Seed Phrase: {wallet_info['seed_phrase']}\n")
-                f.write(f"Total Balance: {wallet_info['total_balance']} BTC\n")
-                f.write("Addresses:\n")
-                for addr_type, addr in wallet_info['addresses'].items():
-                    if isinstance(addr, str):  # Only write address strings
-                        f.write(f"{addr_type}: {addr}\n")
+                f.write(f"Address: {wallet_info['address']}\n")
+                f.write(f"Balance: {wallet_info['balance']} BTC\n")
                 f.write("="*50 + "\n")
 
         except Exception as e:
