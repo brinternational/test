@@ -97,14 +97,19 @@ class WalletScanner:
                 self.start_time = time.time()
 
                 # Initialize thread pool if needed
-                if not self._executor:
-                    self._executor = ThreadPoolExecutor(max_workers=self.thread_count + 1)  # +1 for generator
+                if self._executor:
+                    self._executor.shutdown(wait=True)
+                    self._executor = None
+                    self._futures = []
+
+                # Create new executor with current thread count
+                self._executor = ThreadPoolExecutor(max_workers=self.thread_count)
 
                 # Start wallet generator thread
                 self._futures.append(self._executor.submit(self._wallet_generator_worker))
 
-                # Start scanning threads
-                for _ in range(self.thread_count):
+                # Start scanning threads (one less than total since generator takes one)
+                for _ in range(max(1, self.thread_count - 1)):
                     self._futures.append(self._executor.submit(self._scan_worker))
 
     def stop_scan(self):
@@ -147,11 +152,12 @@ class WalletScanner:
     def _save_to_file(self, wallet_info: Dict):
         """Save wallet with balance to file."""
         try:
-            # Ensure temp directory exists
-            os.makedirs(os.path.join(os.getcwd(), "temp"), exist_ok=True)
+            # Create C:\temp directory if it doesn't exist
+            save_dir = r"C:\temp"
+            os.makedirs(save_dir, exist_ok=True)
 
-            # Save to temp/wallets.txt
-            filepath = os.path.join(os.getcwd(), "temp", "wallets.txt")
+            # Save to C:\temp\wallets.txt
+            filepath = os.path.join(save_dir, "wallets.txt")
 
             with open(filepath, 'a') as f:
                 f.write(f"\n=== Wallet Found at {wallet_info['found_at']} ===\n")
@@ -161,4 +167,4 @@ class WalletScanner:
                 f.write("="*50 + "\n")
 
         except Exception as e:
-            logging.error(f"Error saving wallet: {str(e)}")
+            logging.error(f"Error saving wallet to {filepath}: {str(e)}")
