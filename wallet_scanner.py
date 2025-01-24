@@ -28,6 +28,14 @@ class WalletScanner:
         self.gpu_enabled = True
         self.npu_enabled = True
 
+        # Separate rate tracking for CPU and GPU
+        self.cpu_scan_rates = deque(maxlen=10)
+        self.gpu_scan_rates = deque(maxlen=10)
+        self.cpu_processed = multiprocessing.Value('i', 0)
+        self.gpu_processed = multiprocessing.Value('i', 0)
+        self.last_cpu_time = None
+        self.last_gpu_time = None
+
         # Initialize GPU acceleration if available
         try:
             self.gpu_hasher = GPUHasher(
@@ -41,27 +49,28 @@ class WalletScanner:
             logging.warning(f"GPU acceleration disabled: {str(e)}")
             self.gpu_hasher = None
 
-        # Increased queue sizes and batch processing
+        # Queue configurations
         self.wallet_queue = Queue(maxsize=100000)
         self.result_queue = multiprocessing.Queue()
         self.CPU_BATCH_SIZE = 1000
         self.GPU_BATCH_SIZE = 10000  # Larger batches for GPU
-        self.scan_rates = deque(maxlen=10)
 
-        # Shared memory with Array for better performance
+        # Shared counters
         self.shared_total = multiprocessing.Value('i', 0)
         self.shared_balance_count = multiprocessing.Value('i', 0)
-
-        # Work stealing queue
         self._work_queue = multiprocessing.Queue()
 
         # Ensure wallet save directory exists
-        self.save_dir = os.path.dirname(r"C:\temp\wallets.txt")
+        self.save_dir = os.path.join(os.path.expanduser("~"), "temp")
         try:
             os.makedirs(self.save_dir, exist_ok=True)
             logging.info(f"Wallet save directory created/verified: {self.save_dir}")
         except Exception as e:
             logging.error(f"Failed to create wallet directory {self.save_dir}: {str(e)}")
+            # Create a fallback directory in the current working directory
+            self.save_dir = os.path.join(os.getcwd(), "wallets")
+            os.makedirs(self.save_dir, exist_ok=True)
+            logging.info(f"Created fallback wallet directory: {self.save_dir}")
 
     def _process_batch_gpu(self, batch: List[Dict]) -> List[Dict]:
         """Process wallets using GPU acceleration."""
@@ -202,53 +211,65 @@ class WalletScanner:
         return results
 
     def _scan_worker(self):
-        """Worker with work stealing capabilities."""
-        logging.info("Scan worker started")
+        """Worker with separate CPU rate tracking."""
+        logging.info("CPU Scan worker started")
         while self.scanning:
             try:
-                # Try to get work from main queue
-                try:
-                    batch = self.wallet_queue.get(timeout=0.01)
-                except Empty:
-                    # Try work stealing
-                    try:
-                        batch = self._work_queue.get_nowait()
-                    except Empty:
-                        time.sleep(0.0001)
-                        continue
+                batch = self.wallet_queue.get(timeout=0.01)
+                if batch:
+                    results = self._process_batch_cpu(batch[:self.CPU_BATCH_SIZE])
 
-                # Process the batch
-                results = self._process_batch(batch)
+                    # Update CPU-specific counters
+                    with self.cpu_processed.get_lock():
+                        self.cpu_processed.value += len(batch)
+                        current_time = time.time()
+                        if self.last_cpu_time:
+                            rate = len(batch) / (current_time - self.last_cpu_time)
+                            self.cpu_scan_rates.append(rate)
+                        self.last_cpu_time = current_time
 
-                # Update counters atomically
-                with self.shared_total.get_lock():
-                    self.shared_total.value += len(batch)
-                with self.shared_balance_count.get_lock():
-                    self.shared_balance_count.value += len(results)
+                    with self.shared_total.get_lock():
+                        self.shared_total.value += len(batch)
+                    with self.shared_balance_count.get_lock():
+                        self.shared_balance_count.value += len(results)
 
-                # Save results efficiently
-                if results:
-                    for result in results:
-                        self._save_to_file(result)
-
+                    if results:
+                        for result in results:
+                            self._save_to_file(result)
+            except Empty:
+                time.sleep(0.0001)
             except Exception as e:
-                logging.error(f"Scanner worker error: {str(e)}")
+                logging.error(f"CPU Scanner worker error: {str(e)}")
                 continue
 
     def _gpu_scan_worker(self):
+        """Worker with separate GPU rate tracking."""
         logging.info("GPU Scan worker started")
         while self.scanning:
             try:
                 batch = self.wallet_queue.get(timeout=0.01)
                 if batch:
                     results = self._process_batch_gpu(batch)
+
+                    # Update GPU-specific counters
+                    with self.gpu_processed.get_lock():
+                        self.gpu_processed.value += len(batch)
+                        current_time = time.time()
+                        if self.last_gpu_time:
+                            rate = len(batch) / (current_time - self.last_gpu_time)
+                            self.gpu_scan_rates.append(rate)
+                        self.last_gpu_time = current_time
+
                     with self.shared_total.get_lock():
                         self.shared_total.value += len(batch)
                     with self.shared_balance_count.get_lock():
                         self.shared_balance_count.value += len(results)
+
                     if results:
                         for result in results:
                             self._save_to_file(result)
+            except Empty:
+                time.sleep(0.0001)
             except Exception as e:
                 logging.error(f"GPU Scanner worker error: {str(e)}")
                 continue
@@ -316,20 +337,24 @@ class WalletScanner:
                 logging.info("Scan stopped")
 
     def get_statistics(self):
-        """Get smoothed statistics."""
+        """Get detailed statistics including separate CPU and GPU rates."""
         with self._lock:
-            elapsed_time = time.time() - (self.start_time or time.time())
-            if elapsed_time > 0:
-                current_rate = self.shared_total.value / (elapsed_time / 60)
-                self.scan_rates.append(current_rate)
-                avg_rate = sum(self.scan_rates) / len(self.scan_rates) if self.scan_rates else 0
-            else:
-                avg_rate = 0
+            # Calculate CPU rate
+            cpu_rate = sum(self.cpu_scan_rates) / len(self.cpu_scan_rates) if self.cpu_scan_rates else 0
+            cpu_rate_per_min = cpu_rate * 60 if cpu_rate > 0 else 0
 
+            # Calculate GPU rate
+            gpu_rate = sum(self.gpu_scan_rates) / len(self.gpu_scan_rates) if self.gpu_scan_rates else 0
+            gpu_rate_per_min = gpu_rate * 60 if gpu_rate > 0 else 0
+
+            # Combined statistics
             return {
                 'total_scanned': f"{self.shared_total.value:,}",
+                'cpu_processed': f"{self.cpu_processed.value:,}",
+                'gpu_processed': f"{self.gpu_processed.value:,}",
                 'wallets_with_balance': f"{self.shared_balance_count.value:,}",
-                'scan_rate': f"{avg_rate:,.1f}",
+                'cpu_scan_rate': f"{cpu_rate_per_min:,.1f}",
+                'gpu_scan_rate': f"{gpu_rate_per_min:,.1f}",
                 'active_threads': len([f for f in self._futures[1:] if not f.done()]),
                 'queue_size': f"{self.wallet_queue.qsize() * self.GPU_BATCH_SIZE:,}"
             }

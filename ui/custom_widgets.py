@@ -242,7 +242,7 @@ class WalletFrame(ttk.Frame):
 
         self.mode_label = ttk.Label(
             header,
-            text="Educational Mode",
+            text="",  # Remove educational mode text
             style="Topic.TLabel"
         )
         self.mode_label.pack(side=tk.RIGHT)
@@ -297,15 +297,6 @@ class WalletFrame(ttk.Frame):
         self.thread_spinbox.set(4)
         self.thread_spinbox.pack(side=tk.LEFT)
 
-        # Save location frame
-        save_frame = ttk.LabelFrame(scrollable_frame, text="Save Location")
-        save_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        ttk.Label(
-            save_frame,
-            text="C:\\temp\\wallets.txt",
-            style="Topic.TLabel"
-        ).pack(padx=5, pady=5)
 
         # Progress frame
         progress_frame = ttk.LabelFrame(scrollable_frame, text="Progress")
@@ -343,6 +334,24 @@ class WalletFrame(ttk.Frame):
 
     def toggle_scanning(self):
         """Toggle wallet scanning on/off."""
+        # Check node connection first
+        success, message = BitcoinUtils.test_node_connection()
+        if not success:
+            messagebox.showwarning(
+                "Node Connection Required",
+                "Please configure and connect to a Bitcoin node before scanning.\n\n"
+                "Go to Node Settings tab to configure your connection."
+            )
+            # Switch to node settings tab using parent notebook
+            parent = self.winfo_parent()
+            while parent:
+                widget = self.nametowidget(parent)
+                if isinstance(widget, ttk.Notebook):
+                    widget.select(3)  # Index of node_settings_frame
+                    break
+                parent = widget.winfo_parent()
+            return
+
         if not self.wallet_scanner.scanning:
             # Start scanning
             self.wallet_scanner.start_scan()
@@ -363,10 +372,14 @@ class WalletFrame(ttk.Frame):
         """Update scanning statistics display."""
         if self.wallet_scanner.scanning:
             stats = self.wallet_scanner.get_statistics()
+            cpu_rate = stats['cpu_scan_rate']
+            gpu_rate = stats['gpu_scan_rate']
+
             self.stats_text.set(
                 f"Total Scanned: {stats['total_scanned']} | "
                 f"With Balance: {stats['wallets_with_balance']} | "
-                f"Rate: {stats['scan_rate']} wallets/min | "
+                f"CPU Rate: {cpu_rate} w/min | "
+                f"GPU Rate: {gpu_rate} w/min | "
                 f"Active Threads: {stats['active_threads']} | "
                 f"Queue: {stats['queue_size']}"
             )
@@ -409,6 +422,7 @@ class WalletFrame(ttk.Frame):
         if self.wallet_scanner.scanning:
             self.wallet_scanner.stop_scan()
             self.wallet_scanner.start_scan()
+
 
 
 class SHA256Frame(ttk.Frame):

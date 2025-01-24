@@ -4,7 +4,9 @@ import sys
 from ui.theme import setup_theme
 from ui.custom_widgets import EducationalFrame, WalletFrame, SHA256Frame, NodeSettingsFrame
 from version import get_version_info
+from bitcoin_utils import BitcoinUtils # Added import
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -20,6 +22,11 @@ class BitcoinEducationApp(tk.Tk):
     def __init__(self):
         try:
             super().__init__()
+
+            # Create temp directory for wallets if it doesn't exist
+            temp_dir = os.path.join(os.path.expanduser("~"), "temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            logging.info(f"Temp directory created/verified: {temp_dir}")
 
             # Log version information at startup
             version_info = get_version_info()
@@ -41,7 +48,7 @@ class BitcoinEducationApp(tk.Tk):
             # Simple header
             header = ttk.Label(
                 self.container,
-                text="Bitcoin Wallet Education",
+                text="Bitcoin Wallet Scanner",
                 style="Title.TLabel"
             )
             header.pack(pady=(10, 20))
@@ -61,28 +68,33 @@ class BitcoinEducationApp(tk.Tk):
             self.notebook.add(self.sha256_frame, text="SHA256")
             self.notebook.add(self.node_settings_frame, text="Node Settings")
 
-            # Simple status bar with version
-            status_text = f"Educational Mode Active - v{version_info['version']}"
-            self.status_bar = ttk.Label(
-                self.container,
-                text=status_text,
-                style="TLabel"
-            )
-            self.status_bar.pack(pady=10)
+            # Test node connection and update status
+            self.check_node_connection()
 
         except Exception as e:
             logging.error(f"Error during initialization: {str(e)}")
             messagebox.showerror("Error", f"Failed to start: {str(e)}")
             raise
 
+    def check_node_connection(self):
+        """Test connection to Bitcoin node and update application state."""
+        success, message = BitcoinUtils.test_node_connection()
+        if not success:
+            messagebox.showwarning(
+                "Node Connection",
+                "Not connected to Bitcoin node. Please configure node settings before scanning."
+            )
+            # Switch to node settings tab
+            self.notebook.select(3)  # Index of node_settings_frame
+
     def show_about(self):
         version_info = get_version_info()
         messagebox.showinfo(
             "About",
-            f"Bitcoin Wallet Educational Tool v{version_info['version']}\n"
+            f"Bitcoin Wallet Scanner v{version_info['version']}\n"
             f"Built on: {version_info['build_date']}\n\n"
-            "This application is designed to teach Bitcoin wallet concepts "
-            "and SHA256 hashing in an interactive way."
+            "This application scans for Bitcoin wallets and "
+            "provides educational resources about Bitcoin technology."
         )
 
 if __name__ == "__main__":
