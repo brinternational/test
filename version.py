@@ -2,7 +2,7 @@
 from datetime import datetime
 
 # Semantic versioning
-VERSION = "0.1.5"  # Updated node connection testing
+VERSION = "0.1.6"  # Updated with optimized wallet scanning
 BUILD_TIMESTAMP = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Updated whenever version.py is modified
 
 def get_version_info():
