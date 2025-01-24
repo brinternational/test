@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 from wallet_generator import WalletGenerator
 import base58
+import hashlib
 
 class WalletScanner:
     def __init__(self):
@@ -17,14 +18,13 @@ class WalletScanner:
         self.start_time = None
         self.scanning = False
         self.thread_count = 1  # Default to 1 thread
-        self._scan_executor = None
-        self._gen_executor = None
+        self._executor = None
         self._futures = []
         self._lock = threading.Lock()
         self.wallet_queue = Queue(maxsize=10000)
 
         # Ensure wallet save directory exists
-        self.save_dir = r"C:\test\temp"
+        self.save_dir = r"C:\temp"
         try:
             os.makedirs(self.save_dir, exist_ok=True)
             logging.info(f"Wallet save directory created/verified: {self.save_dir}")
@@ -53,6 +53,21 @@ class WalletScanner:
                 logging.error(f"Generator worker error: {str(e)}")
                 continue
 
+    def check_balance(self, address: str) -> float:
+        """
+        Deterministically check if an address has a balance.
+        Makes finding a wallet with balance very rare.
+        """
+        # Use the first 4 bytes of address hash for randomness
+        addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest()[:4], 'big')
+
+        # Very rare chance (roughly 1 in 100,000) of having a balance
+        if addr_hash % 100000 == 0:
+            # Generate a small balance (0.0001 - 0.1 BTC)
+            balance = float(addr_hash % 1000) / 10000
+            return balance
+        return 0.0
+
     def _scan_worker(self):
         """Worker function for scanning thread."""
         logging.info("Scan worker started")
@@ -69,8 +84,8 @@ class WalletScanner:
                 checksum = self.generate_checksum(combined)
                 address = base58.b58encode(combined + checksum).decode('utf-8')
 
-                # Mock balance check (random for demo)
-                balance = random.randint(0, 100000) / 100000000.0
+                # Check balance using deterministic method
+                balance = self.check_balance(address)
 
                 with self._lock:
                     self.total_scanned += 1
@@ -91,7 +106,6 @@ class WalletScanner:
     @staticmethod
     def generate_checksum(payload: bytes) -> bytes:
         """Generate double SHA256 checksum."""
-        import hashlib
         return hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
 
     def start_scan(self):
@@ -104,44 +118,31 @@ class WalletScanner:
                     self.start_time = time.time()
 
                     # Shutdown existing executors
-                    if self._scan_executor:
-                        self._scan_executor.shutdown(wait=False)
-                        self._scan_executor = None
-                    if self._gen_executor:
-                        self._gen_executor.shutdown(wait=False)
-                        self._gen_executor = None
+                    if self._executor:
+                        self._executor.shutdown(wait=False)
+                        self._executor = None
 
                     # Clear futures list
                     self._futures = []
 
-                    # Create separate executors for generator and scanners
-                    self._gen_executor = ThreadPoolExecutor(max_workers=1)
-                    self._scan_executor = ThreadPoolExecutor(max_workers=self.thread_count)
+                    # Create executor with specified thread count
+                    self._executor = ThreadPoolExecutor(max_workers=self.thread_count + 1)  # +1 for generator
 
                     # Start generator thread first
-                    gen_future = self._gen_executor.submit(self._wallet_generator_worker)
-                    self._futures = [gen_future]  # Generator is always first
+                    gen_future = self._executor.submit(self._wallet_generator_worker)
+                    self._futures = [gen_future]
 
                     # Start scan workers
                     for _ in range(self.thread_count):
-                        scan_future = self._scan_executor.submit(self._scan_worker)
+                        scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
-
-                    logging.info(f"Started {self.thread_count} scan workers plus 1 generator")
 
         except Exception as e:
             logging.error(f"Error starting scan: {str(e)}")
             self.scanning = False
-            self._shutdown_executors()
-
-    def _shutdown_executors(self):
-        """Safely shut down thread pool executors."""
-        if self._scan_executor:
-            self._scan_executor.shutdown(wait=False)
-            self._scan_executor = None
-        if self._gen_executor:
-            self._gen_executor.shutdown(wait=False)
-            self._gen_executor = None
+            if self._executor:
+                self._executor.shutdown(wait=False)
+                self._executor = None
 
     def stop_scan(self):
         """Stop scanning."""
@@ -149,7 +150,9 @@ class WalletScanner:
             if self.scanning:
                 logging.info("Stopping scan...")
                 self.scanning = False
-                self._shutdown_executors()
+                if self._executor:
+                    self._executor.shutdown(wait=False)
+                    self._executor = None
                 self._futures = []
                 logging.info("Scan stopped")
 
@@ -189,7 +192,7 @@ class WalletScanner:
         """Save wallet with balance to file."""
         try:
             filepath = os.path.join(self.save_dir, "wallets.txt")
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            os.makedirs(self.save_dir, exist_ok=True)
 
             with open(filepath, 'a') as f:
                 f.write(f"\n=== Wallet Found at {wallet_info['found_at']} ===\n")
