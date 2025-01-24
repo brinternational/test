@@ -16,7 +16,8 @@ from gpu_hasher import GPUHasher
 class WalletScanner:
     def __init__(self):
         self.scanning = False
-        self.thread_count = multiprocessing.cpu_count()
+        self.cpu_thread_count = multiprocessing.cpu_count()
+        self.gpu_thread_count = 256  # Default GPU threads
         self._executor = None
         self._process_pool = None
         self._futures = []
@@ -32,7 +33,8 @@ class WalletScanner:
             self.gpu_hasher = GPUHasher(
                 enable_cpu=self.cpu_enabled,
                 enable_gpu=self.gpu_enabled,
-                enable_npu=self.npu_enabled
+                enable_npu=self.npu_enabled,
+                gpu_threads=self.gpu_thread_count
             )
             logging.info(f"GPU acceleration enabled: {self.gpu_hasher.get_device_info()}")
         except Exception as e:
@@ -40,9 +42,10 @@ class WalletScanner:
             self.gpu_hasher = None
 
         # Increased queue sizes and batch processing
-        self.wallet_queue = Queue(maxsize=100000)  # 2x larger queue
+        self.wallet_queue = Queue(maxsize=100000)
         self.result_queue = multiprocessing.Queue()
-        self.BATCH_SIZE = 10000  # 2x larger batches
+        self.CPU_BATCH_SIZE = 1000
+        self.GPU_BATCH_SIZE = 10000  # Larger batches for GPU
         self.scan_rates = deque(maxlen=10)
 
         # Shared memory with Array for better performance
@@ -53,7 +56,7 @@ class WalletScanner:
         self._work_queue = multiprocessing.Queue()
 
         # Ensure wallet save directory exists
-        self.save_dir = r"C:\temp"  # Changed from test/temp to temp
+        self.save_dir = os.path.dirname(r"C:\temp\wallets.txt")
         try:
             os.makedirs(self.save_dir, exist_ok=True)
             logging.info(f"Wallet save directory created/verified: {self.save_dir}")
@@ -142,10 +145,14 @@ class WalletScanner:
             return []
 
     def _process_batch(self, batch: List[Dict]) -> List[Dict]:
-        """Process a batch of wallets, using GPU if available."""
-        if self.gpu_hasher:
+        """Process a batch of wallets, optimizing for GPU when available."""
+        if self.gpu_hasher and self.gpu_enabled:
+            # Use larger batch size for GPU
+            if len(batch) < self.GPU_BATCH_SIZE:
+                # Accumulate more data for GPU processing
+                return []
             return self._process_batch_gpu(batch)
-        return self._process_batch_cpu(batch)
+        return self._process_batch_cpu(batch[:self.CPU_BATCH_SIZE])
 
     def _wallet_generator_worker(self):
         """Generate wallets with improved batching."""
@@ -157,7 +164,7 @@ class WalletScanner:
                 if self.wallet_queue.qsize() < self.wallet_queue.maxsize * 0.7:  # More aggressive threshold
                     # Pre-allocate batch for better memory efficiency
                     local_batch = []
-                    local_batch_size = min(self.BATCH_SIZE,
+                    local_batch_size = min(self.GPU_BATCH_SIZE,
                                              self.wallet_queue.maxsize - self.wallet_queue.qsize())
 
                     # Bulk generate wallets
@@ -228,12 +235,34 @@ class WalletScanner:
                 logging.error(f"Scanner worker error: {str(e)}")
                 continue
 
+    def _gpu_scan_worker(self):
+        logging.info("GPU Scan worker started")
+        while self.scanning:
+            try:
+                batch = self.wallet_queue.get(timeout=0.01)
+                if batch:
+                    results = self._process_batch_gpu(batch)
+                    with self.shared_total.get_lock():
+                        self.shared_total.value += len(batch)
+                    with self.shared_balance_count.get_lock():
+                        self.shared_balance_count.value += len(results)
+                    if results:
+                        for result in results:
+                            self._save_to_file(result)
+            except Exception as e:
+                logging.error(f"GPU Scanner worker error: {str(e)}")
+                continue
+
+
     def start_scan(self):
         """Start scanning with optimized process pool."""
         try:
             with self._lock:
                 if not self.scanning:
-                    logging.info(f"Starting scan with {self.thread_count} CPU cores")
+                    logging.info(f"Starting scan with {self.cpu_thread_count} CPU cores")
+                    if self.gpu_enabled and self.gpu_hasher:
+                        logging.info(f"GPU enabled with {self.gpu_thread_count} threads")
+
                     self.scanning = True
                     self.start_time = time.time()
                     self.scan_rates.clear()
@@ -241,9 +270,9 @@ class WalletScanner:
                     self._cleanup_executors()
 
                     # Optimized process pool settings
-                    self._executor = ThreadPoolExecutor(max_workers=2)
+                    self._executor = ThreadPoolExecutor(max_workers=2)  # For control threads
                     self._process_pool = ProcessPoolExecutor(
-                        max_workers=self.thread_count,
+                        max_workers=self.cpu_thread_count,
                         mp_context=multiprocessing.get_context('spawn'),
                         initializer=lambda: os.nice(-20)  # Set high priority
                     )
@@ -252,9 +281,15 @@ class WalletScanner:
                     gen_future = self._executor.submit(self._wallet_generator_worker)
                     self._futures = [gen_future]
 
-                    for _ in range(self.thread_count):
+                    # Start CPU workers
+                    for _ in range(self.cpu_thread_count):
                         scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
+
+                    # Start GPU worker if available
+                    if self.gpu_enabled and self.gpu_hasher:
+                        gpu_future = self._executor.submit(self._gpu_scan_worker)
+                        self._futures.append(gpu_future)
 
         except Exception as e:
             logging.error(f"Error starting scan: {str(e)}")
@@ -296,7 +331,7 @@ class WalletScanner:
                 'wallets_with_balance': f"{self.shared_balance_count.value:,}",
                 'scan_rate': f"{avg_rate:,.1f}",
                 'active_threads': len([f for f in self._futures[1:] if not f.done()]),
-                'queue_size': f"{self.wallet_queue.qsize() * self.BATCH_SIZE:,}"
+                'queue_size': f"{self.wallet_queue.qsize() * self.GPU_BATCH_SIZE:,}"
             }
 
     def set_thread_count(self, count: int):
@@ -305,9 +340,17 @@ class WalletScanner:
             raise ValueError("Thread count must be at least 1")
 
         with self._lock:
-            old_count = self.thread_count
-            self.thread_count = min(count, multiprocessing.cpu_count())
-            logging.info(f"Thread count changed from {old_count} to {self.thread_count}")
+            old_count = self.cpu_thread_count
+            self.cpu_thread_count = min(count, multiprocessing.cpu_count())
+
+            # Adjust GPU threads if GPU is enabled
+            if self.gpu_enabled and self.gpu_hasher:
+                # Scale GPU threads based on CPU thread count but keep it reasonable
+                self.gpu_thread_count = min(count * 64, 1024)  # Max 1024 GPU threads
+                self.gpu_hasher.set_gpu_threads(self.gpu_thread_count)
+                logging.info(f"GPU threads adjusted to {self.gpu_thread_count}")
+
+            logging.info(f"CPU thread count changed from {old_count} to {self.cpu_thread_count}")
 
             if self.scanning:
                 self.stop_scan()

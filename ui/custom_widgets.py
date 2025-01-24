@@ -208,9 +208,30 @@ class WalletFrame(ttk.Frame):
         self.setup_ui()
 
     def setup_ui(self):
-        # Title and description
-        header = ttk.Frame(self)
-        header.pack(fill=tk.X, padx=20, pady=10)
+        # Configure grid layout
+        self.grid_columnconfigure(0, weight=1)
+
+        # Create main scrollable frame
+        canvas = tk.Canvas(self)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=canvas.winfo_reqwidth())
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Grid layout for canvas and scrollbar
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.grid_rowconfigure(0, weight=1)
+
+        # Title and mode indicator in header frame
+        header = ttk.Frame(scrollable_frame)
+        header.pack(fill=tk.X, padx=10, pady=5)
 
         title = ttk.Label(
             header,
@@ -219,54 +240,50 @@ class WalletFrame(ttk.Frame):
         )
         title.pack(side=tk.LEFT)
 
-        # Mode indicator
         self.mode_label = ttk.Label(
             header,
             text="Educational Mode",
             style="Topic.TLabel"
         )
-        self.mode_label.pack(side=tk.RIGHT, padx=5)
+        self.mode_label.pack(side=tk.RIGHT)
 
-        # Start/Stop Scanning button in its own frame
-        button_frame = ttk.Frame(self)
-        button_frame.pack(fill=tk.X, padx=20, pady=10)
-
+        # Prominent scan button
         self.scan_button = ttk.Button(
-            button_frame,
-            text="Start Scanning",
+            scrollable_frame,
+            text="▶ Start Scanning",
             command=self.toggle_scanning,
             style='Action.TButton',
             cursor="hand2",
-            width=20  # Make button wider
+            width=25  # Make button wider
         )
-        self.scan_button.pack(pady=5)
-
-        # Controls section
-        controls = ttk.LabelFrame(self, text="Scanner Settings")
-        controls.pack(fill=tk.X, padx=20, pady=10)
+        self.scan_button.pack(pady=10, padx=10, fill=tk.X)
 
         # Hardware acceleration frame
-        accel_frame = ttk.Frame(controls)
-        accel_frame.pack(fill=tk.X, padx=5, pady=5)
+        accel_frame = ttk.LabelFrame(scrollable_frame, text="Hardware Settings")
+        accel_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(accel_frame, text="Hardware Acceleration:").pack(side=tk.LEFT, padx=5)
+        # Acceleration options
+        options_frame = ttk.Frame(accel_frame)
+        options_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # Acceleration checkboxes
         self.cpu_var = tk.BooleanVar(value=True)
         self.gpu_var = tk.BooleanVar(value=False)
         self.npu_var = tk.BooleanVar(value=False)
 
         for text, var in [("CPU", self.cpu_var), ("GPU", self.gpu_var), ("NPU", self.npu_var)]:
+            frame = ttk.Frame(options_frame)
+            frame.pack(side=tk.LEFT, padx=5)
+
             ttk.Checkbutton(
-                accel_frame,
+                frame,
                 text=text,
                 variable=var,
                 command=self.update_acceleration,
                 style='Clickable.TCheckbutton'
-            ).pack(side=tk.LEFT, padx=5)
+            ).pack(side=tk.LEFT)
 
-        # Thread control frame
-        thread_frame = ttk.Frame(controls)
+        # Thread control with label
+        thread_frame = ttk.Frame(accel_frame)
         thread_frame.pack(fill=tk.X, padx=5, pady=5)
 
         ttk.Label(thread_frame, text="Thread Count:").pack(side=tk.LEFT, padx=5)
@@ -278,51 +295,51 @@ class WalletFrame(ttk.Frame):
             command=self.update_thread_count
         )
         self.thread_spinbox.set(4)
-        self.thread_spinbox.pack(side=tk.LEFT, padx=5)
+        self.thread_spinbox.pack(side=tk.LEFT)
 
         # Save location frame
-        save_frame = ttk.Frame(controls)
-        save_frame.pack(fill=tk.X, padx=5, pady=5)
+        save_frame = ttk.LabelFrame(scrollable_frame, text="Save Location")
+        save_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        save_path = os.path.join("C:", "temp", "wallets.txt")
         ttk.Label(
             save_frame,
-            text=f"Save Location: {save_path}",
+            text="C:\\temp\\wallets.txt",
             style="Topic.TLabel"
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(padx=5, pady=5)
 
-        # Statistics Frame
-        stats_frame = ttk.LabelFrame(self, text="Scanning Statistics")
-        stats_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Progress frame
+        progress_frame = ttk.LabelFrame(scrollable_frame, text="Progress")
+        progress_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        # Progress Bar
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(
-            stats_frame,
+            progress_frame,
             variable=self.progress_var,
             mode='indeterminate'
         )
         self.progress.pack(fill=tk.X, padx=5, pady=5)
 
-        # Statistics Labels
-        self.stats_text = tk.StringVar(value="Click 'Start Scanning' to begin searching for wallets")
-        stats_label = ttk.Label(
+        # Statistics display
+        stats_frame = ttk.LabelFrame(scrollable_frame, text="Statistics")
+        stats_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.stats_text = tk.StringVar(value="Click 'Start Scanning' to begin")
+        ttk.Label(
             stats_frame,
             textvariable=self.stats_text,
-            wraplength=500  # Ensure text wraps appropriately
-        )
-        stats_label.pack(pady=5)
+            wraplength=400
+        ).pack(padx=5, pady=5)
 
         # Results area
-        results_frame = ttk.LabelFrame(self, text="Scanning Results")
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        results_frame = ttk.LabelFrame(scrollable_frame, text="Results")
+        results_frame.pack(fill=tk.BOTH, padx=10, pady=5)
 
         self.results_display = ttk.Label(
             results_frame,
             text="Scanning results will appear here",
-            wraplength=500
+            wraplength=400
         )
-        self.results_display.pack(pady=10)
+        self.results_display.pack(padx=5, pady=5)
 
     def toggle_scanning(self):
         """Toggle wallet scanning on/off."""
@@ -337,7 +354,7 @@ class WalletFrame(ttk.Frame):
         else:
             # Stop scanning
             self.wallet_scanner.stop_scan()
-            self.scan_button.config(text="Start Scanning")
+            self.scan_button.config(text="▶ Start Scanning")
             self.progress.stop()
             self.thread_spinbox.config(state='normal')  # Re-enable after stopping
             self.results_display.config(text="Scanning stopped")
