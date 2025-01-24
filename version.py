@@ -2,7 +2,7 @@
 from datetime import datetime
 
 # Semantic versioning
-VERSION = "0.1.8"  # Updated with multiprocessing and batch processing optimizations
+VERSION = "0.1.9"  # Updated with advanced multiprocessing optimizations and smoothed statistics
 BUILD_TIMESTAMP = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Updated whenever version.py is modified
 
 def get_version_info():
