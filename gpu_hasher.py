@@ -96,6 +96,7 @@ class GPUHasher:
         self.enable_npu = enable_npu
         self.gpu_threads = gpu_threads
         self.max_work_group_size = 256  # Will be updated based on device capabilities
+        self.platform_info = None
 
         try:
             self._initialize_accelerator()
@@ -107,52 +108,72 @@ class GPUHasher:
             self.enable_npu = False
 
     def _detect_qualcomm_npu(self, platform) -> Optional[cl.Device]:
-        """Detect Qualcomm NPU specifically."""
+        """Detect Qualcomm NPU with improved detection."""
         try:
             for device in platform.get_devices():
-                if any(id_str.lower() in device.name.lower() for id_str in ['qualcomm', 'qcom', 'adreno']):
-                    if device.type == cl.device_type.ACCELERATOR:
-                        logging.info(f"Detected Qualcomm NPU: {device.name}")
+                device_name = device.name.lower()
+                vendor = device.vendor.lower() if hasattr(device, 'vendor') else ''
+
+                # Log device information for debugging
+                logging.info(f"Checking device: {device.name} (Vendor: {vendor})")
+                logging.info(f"Device type: {device.type}")
+
+                # Check for Qualcomm/Adreno identifiers
+                is_qualcomm = any(id_str in vendor or id_str in device_name 
+                                for id_str in ['qualcomm', 'qcom', 'adreno'])
+
+                if is_qualcomm:
+                    if device.type in [cl.device_type.GPU, cl.device_type.ACCELERATOR]:
+                        logging.info(f"Detected Qualcomm GPU/NPU: {device.name}")
                         return device
             return None
-        except:
+        except Exception as e:
+            logging.error(f"Error in Qualcomm NPU detection: {str(e)}")
             return None
 
     def _initialize_accelerator(self):
-        """Initialize OpenCL context with improved error handling."""
+        """Initialize OpenCL context with improved platform detection."""
         try:
             platforms = cl.get_platforms()
             if not platforms:
-                logging.warning("No OpenCL platforms available - falling back to CPU")
-                self.device_type = "CPU"
-                self.enable_gpu = False
-                self.enable_npu = False
+                logging.warning("No OpenCL platforms found - falling back to CPU")
+                self._fallback_to_cpu()
                 return
+
+            # Log available platforms for debugging
+            platform_info = []
+            for p in platforms:
+                try:
+                    devices = p.get_devices()
+                    platform_info.append(f"Platform: {p.name}, Version: {p.version}, Devices: {[d.name for d in devices]}")
+                except:
+                    platform_info.append(f"Platform: {p.name}, Version: {p.version}, Devices: Error getting devices")
+
+            self.platform_info = "\n".join(platform_info)
+            logging.info(f"Available OpenCL platforms:\n{self.platform_info}")
 
             selected_device = None
             platform = platforms[0]
 
             # Try each acceleration method in order of preference
-            if self.enable_npu and not selected_device:
+            if self.enable_gpu:
                 try:
+                    # First try to detect Qualcomm GPU
                     selected_device = self._detect_qualcomm_npu(platform)
                     if selected_device:
-                        self.device_type = "NPU"
-                        logging.info("NPU acceleration enabled")
-                except Exception as e:
-                    logging.warning(f"NPU detection failed: {str(e)}")
-
-            if self.enable_gpu and not selected_device:
-                try:
-                    devices = platform.get_devices(device_type=cl.device_type.GPU)
-                    if devices:
-                        selected_device = devices[0]
                         self.device_type = "GPU"
-                        logging.info("GPU acceleration enabled")
+                        logging.info("Qualcomm GPU acceleration enabled")
+                    else:
+                        # Try other GPU devices
+                        devices = platform.get_devices(device_type=cl.device_type.GPU)
+                        if devices:
+                            selected_device = devices[0]
+                            self.device_type = "GPU"
+                            logging.info(f"GPU acceleration enabled: {selected_device.name}")
                 except Exception as e:
                     logging.warning(f"GPU detection failed: {str(e)}")
 
-            if self.enable_cpu and not selected_device:
+            if not selected_device and self.enable_cpu:
                 try:
                     devices = platform.get_devices(device_type=cl.device_type.CPU)
                     if devices:
@@ -164,9 +185,7 @@ class GPUHasher:
 
             if not selected_device:
                 logging.warning("No compatible acceleration devices found - using CPU")
-                self.device_type = "CPU"
-                self.enable_gpu = False
-                self.enable_npu = False
+                self._fallback_to_cpu()
                 return
 
             # Initialize OpenCL context and queue
@@ -176,12 +195,19 @@ class GPUHasher:
             self.max_work_group_size = min(256, selected_device.max_work_group_size)
 
             logging.info(f"Acceleration initialized on: {selected_device.name}")
+            logging.info(f"Device max work group size: {self.max_work_group_size}")
+            logging.info(f"Device max compute units: {selected_device.max_compute_units}")
 
         except Exception as e:
             logging.error(f"Acceleration initialization failed: {str(e)}")
-            self.device_type = "CPU"
-            self.enable_gpu = False
-            self.enable_npu = False
+            self._fallback_to_cpu()
+
+    def _fallback_to_cpu(self):
+        """Helper method to set CPU fallback mode."""
+        self.device_type = "CPU"
+        self.enable_gpu = False
+        self.enable_npu = False
+        logging.warning("Falling back to CPU-only mode")
 
     def _verify_device_capabilities(self, device):
         """Verify if device meets minimum requirements."""
