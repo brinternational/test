@@ -65,7 +65,7 @@ class WalletScanner:
 
                 entropy = wallet_data['entropy']
                 version_byte = b'\x00'  # mainnet
-                combined = version_byte + entropy[:20]
+                combined = version_byte + entropy[:20]  # Use first 20 bytes for demo
                 checksum = self.generate_checksum(combined)
                 address = base58.b58encode(combined + checksum).decode('utf-8')
 
@@ -189,6 +189,7 @@ class WalletScanner:
         """Save wallet with balance to file."""
         try:
             filepath = os.path.join(self.save_dir, "wallets.txt")
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
             with open(filepath, 'a') as f:
                 f.write(f"\n=== Wallet Found at {wallet_info['found_at']} ===\n")
