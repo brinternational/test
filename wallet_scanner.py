@@ -4,7 +4,6 @@ from datetime import datetime
 import os
 import threading
 import multiprocessing
-import psutil
 from queue import Queue, Empty
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -17,14 +16,13 @@ from gpu_hasher import GPUHasher
 class WalletScanner:
     def __init__(self):
         self.scanning = False
-        # Get physical core count for better thread allocation
-        self.cpu_thread_count = psutil.cpu_count(logical=False) or 2
+        # Get physical core count using multiprocessing
+        self.cpu_thread_count = max(multiprocessing.cpu_count() // 2, 1)  # Use half of logical cores
         self.gpu_thread_count = 256
         self._executor = None
         self._process_pool = None
         self._futures = []
         self._lock = threading.Lock()
-        self._process_priorities_set = False
 
         # Acceleration preferences
         self.cpu_enabled = True
@@ -34,15 +32,6 @@ class WalletScanner:
         # Optimize batch sizes based on core count
         self.CPU_BATCH_SIZE = max(1000 * self.cpu_thread_count, 5000)
         self.GPU_BATCH_SIZE = 10000
-
-        # Separate rate tracking for CPU and GPU
-        self.cpu_scan_rates = deque(maxlen=10)
-        self.gpu_scan_rates = deque(maxlen=10)
-        self.scan_rates = deque(maxlen=10)
-        self.cpu_processed = multiprocessing.Value('i', 0)
-        self.gpu_processed = multiprocessing.Value('i', 0)
-        self.last_cpu_time = None
-        self.last_gpu_time = None
 
         # Initialize GPU acceleration if available
         try:
@@ -61,10 +50,18 @@ class WalletScanner:
         self.wallet_queue = Queue(maxsize=self.CPU_BATCH_SIZE * 4)
         self.result_queue = multiprocessing.Queue()
 
-        # Shared counters
+        # Shared counters for statistics
         self.shared_total = multiprocessing.Value('i', 0)
         self.shared_balance_count = multiprocessing.Value('i', 0)
-        self._work_queue = multiprocessing.Queue()
+        self.cpu_processed = multiprocessing.Value('i', 0)
+        self.gpu_processed = multiprocessing.Value('i', 0)
+
+        # Rate tracking
+        self.cpu_scan_rates = deque(maxlen=10)
+        self.gpu_scan_rates = deque(maxlen=10)
+        self.scan_rates = deque(maxlen=10)
+        self.last_cpu_time = None
+        self.last_gpu_time = None
 
         # Ensure wallet save directory exists
         self.save_dir = os.path.join(os.path.expanduser("~"), "temp")
@@ -81,37 +78,21 @@ class WalletScanner:
             os.makedirs(self.save_dir, exist_ok=True)
             logging.info(f"Created fallback wallet directory: {self.save_dir}")
 
-    def _set_process_priority(self, pid=None):
-        """Set process priority and affinity for better CPU utilization."""
+    def _set_process_priority(self):
+        """Set process priority using native Windows API if available."""
         try:
-            process = psutil.Process(pid or os.getpid())
-
-            # Set high priority
             if os.name == 'nt':  # Windows
-                process.nice(psutil.HIGH_PRIORITY_CLASS)
-            else:  # Unix
-                process.nice(-10)
-
-            # Set process affinity to use all available cores
-            cpu_count = psutil.cpu_count(logical=True)
-            if cpu_count > 1:
-                all_cores = list(range(cpu_count))
-                process.cpu_affinity(all_cores)
-
-            logging.info(f"Process {process.pid} priority and affinity set")
+                import ctypes
+                process = ctypes.windll.kernel32.GetCurrentProcess()
+                ctypes.windll.kernel32.SetPriorityClass(process, 0x00008000)  # HIGH_PRIORITY_CLASS
+                logging.info("Process priority set to HIGH_PRIORITY_CLASS")
         except Exception as e:
             logging.warning(f"Failed to set process priority: {str(e)}")
 
     def _process_initializer(self):
         """Initialize worker process with optimized settings."""
         self._set_process_priority()
-
-        # Disable GPU for worker processes
-        self.gpu_enabled = False
-
-        # Set thread name for better debugging
         threading.current_thread().name = f"WalletScanner-{os.getpid()}"
-
         logging.info(f"Worker process {os.getpid()} initialized")
 
     def _process_batch_gpu(self, batch: List[Dict]) -> List[Dict]:
