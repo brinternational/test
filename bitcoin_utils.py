@@ -4,7 +4,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 import random
-import base58check as base58  # Changed to base58check for better Bitcoin address handling
+import base58check  # Use base58check directly without alias
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
@@ -139,11 +139,11 @@ class BitcoinUtils:
 
         # P2PKH address
         version_byte = b'\x00'  # mainnet
-        legacy_address = base58.b58encode_check(version_byte + public_key_hash).decode('ascii')
+        legacy_address = base58check.encode(version_byte + public_key_hash)  # Changed from b58encode_check
 
         # P2SH address (mock implementation)
         script_version = b'\x05'  # mainnet
-        segwit_address = base58.b58encode_check(script_version + public_key_hash).decode('ascii')
+        segwit_address = base58check.encode(script_version + public_key_hash)  # Changed from b58encode_check
 
         # Native SegWit (mock bech32 implementation)
         native_segwit = f"bc1{public_key_hash.hex()[:32]}"

@@ -10,6 +10,10 @@
 ### 1. Install Python
 Download and install Python 3.11 from [python.org](https://www.python.org/downloads/)
 
+Important: During Python installation:
+- Check "Add Python to PATH"
+- Ensure "tcl/tk and IDLE" is selected (this includes tkinter)
+
 Verify installation:
 ```bash
 python --version
@@ -25,6 +29,8 @@ cd <repository-directory>
 ```bash
 pip install base58check python-bitcoinrpc
 ```
+
+Note: tkinter comes with Python installation and doesn't need to be installed separately via pip.
 
 ### 4. Run the Application
 ```bash
