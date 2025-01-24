@@ -22,6 +22,14 @@ class WalletScanner:
         self._lock = threading.Lock()
         self.wallet_queue = Queue(maxsize=10000)  # Increased buffer size for faster processing
 
+        # Ensure wallet save directory exists
+        self.save_dir = r"C:\test\temp"
+        try:
+            os.makedirs(self.save_dir, exist_ok=True)
+            logging.info(f"Wallet save directory created/verified: {self.save_dir}")
+        except Exception as e:
+            logging.error(f"Failed to create wallet directory {self.save_dir}: {str(e)}")
+
     def _wallet_generator_worker(self):
         """Continuously generate new wallets and add to queue."""
         while self.scanning:
@@ -91,28 +99,36 @@ class WalletScanner:
 
     def start_scan(self):
         """Start or resume scanning."""
-        with self._lock:
-            if not self.scanning:
-                self.scanning = True
-                self.start_time = time.time()
+        try:
+            with self._lock:
+                if not self.scanning:
+                    self.scanning = True
+                    self.start_time = time.time()
 
-                # Initialize thread pool if needed
-                if self._executor:
-                    self._executor.shutdown(wait=True)
-                    self._executor = None
+                    # Stop existing executor if any
+                    if self._executor:
+                        self._executor.shutdown(wait=True)
+
+                    # Clear futures list
                     self._futures = []
 
-                # Create new executor with current thread count
-                total_workers = self.thread_count  # Include generator thread in total
-                self._executor = ThreadPoolExecutor(max_workers=total_workers)
-                self._futures = []
+                    # Initialize new thread pool with exactly thread_count workers
+                    self._executor = ThreadPoolExecutor(max_workers=self.thread_count)
 
-                # Start wallet generator thread (counts as one worker)
-                self._futures.append(self._executor.submit(self._wallet_generator_worker))
+                    # Start exactly thread_count workers
+                    for _ in range(self.thread_count):
+                        self._futures.append(self._executor.submit(self._scan_worker))
 
-                # Start scanning threads with remaining workers
-                for _ in range(total_workers - 1):  # -1 for generator thread
-                    self._futures.append(self._executor.submit(self._scan_worker))
+                    # Add one generator worker outside the thread count
+                    self._futures.append(ThreadPoolExecutor(max_workers=1).submit(self._wallet_generator_worker))
+
+                    logging.info(f"Started scanning with {self.thread_count} scan workers and 1 generator")
+
+        except Exception as e:
+            logging.error(f"Error starting scan: {str(e)}")
+            self.scanning = False
+            if self._executor:
+                self._executor.shutdown(wait=False)
 
     def stop_scan(self):
         """Stop scanning."""
@@ -122,7 +138,8 @@ class WalletScanner:
                 if self._executor:
                     self._executor.shutdown(wait=True)
                     self._executor = None
-                    self._futures = []
+                self._futures = []
+                logging.info("Scanning stopped")
 
     def get_statistics(self):
         """Get current scanning statistics."""
@@ -130,14 +147,14 @@ class WalletScanner:
             elapsed_time = time.time() - (self.start_time or time.time())
             scan_rate = self.total_scanned / (elapsed_time / 60) if elapsed_time > 0 else 0
 
-            # Count only active threads, subtracting completed/failed futures
-            active_threads = sum(1 for f in self._futures if not f.done())
+            # Count only active scanning threads (excluding generator)
+            active_threads = sum(1 for f in self._futures[:-1] if not f.done())  # Exclude generator thread
 
             return {
                 'total_scanned': self.total_scanned,
                 'wallets_with_balance': len(self.wallets_with_balance),
                 'scan_rate': round(scan_rate, 2),
-                'active_threads': active_threads,  # Now accurately counts active threads
+                'active_threads': active_threads,
                 'queue_size': self.wallet_queue.qsize()
             }
 
@@ -148,6 +165,7 @@ class WalletScanner:
 
         with self._lock:
             self.thread_count = count
+            logging.info(f"Thread count set to {count}")
 
             # If scanning is active, restart with new thread count
             if self.scanning:
@@ -157,12 +175,7 @@ class WalletScanner:
     def _save_to_file(self, wallet_info: Dict):
         """Save wallet with balance to file."""
         try:
-            # Create C:\temp directory if it doesn't exist
-            save_dir = r"C:\test\temp"  # Changed to match the path shown in UI
-            os.makedirs(save_dir, exist_ok=True)
-
-            # Save to wallets.txt
-            filepath = os.path.join(save_dir, "wallets.txt")
+            filepath = os.path.join(self.save_dir, "wallets.txt")
 
             with open(filepath, 'a') as f:
                 f.write(f"\n=== Wallet Found at {wallet_info['found_at']} ===\n")
@@ -170,6 +183,8 @@ class WalletScanner:
                 f.write(f"Address: {wallet_info['address']}\n")
                 f.write(f"Balance: {wallet_info['balance']} BTC\n")
                 f.write("="*50 + "\n")
+
+            logging.info(f"Saved wallet with balance {wallet_info['balance']} BTC to {filepath}")
 
         except Exception as e:
             logging.error(f"Error saving wallet to {filepath}: {str(e)}")
