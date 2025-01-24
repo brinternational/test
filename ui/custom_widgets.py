@@ -240,9 +240,10 @@ class WalletFrame(ttk.Frame):
         )
         title.pack(side=tk.LEFT)
 
+        # Remove mode label since we don't need it
         self.mode_label = ttk.Label(
             header,
-            text="",  # Remove educational mode text
+            text="",  # Remove text completely
             style="Topic.TLabel"
         )
         self.mode_label.pack(side=tk.RIGHT)
