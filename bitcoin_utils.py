@@ -4,7 +4,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 import random
-import base58check  # Use base58check directly without alias
+import base58  # Use base58 directly for encoding
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
@@ -22,6 +22,65 @@ class BitcoinUtils:
     MOCK_MODE = True  # Default to mock mode if node connection fails
     MOCK_BLOCKCHAIN_HEIGHT = 800000
     MOCK_NETWORK = "testnet"
+
+    @classmethod
+    def generate_checksum(cls, payload: bytes) -> bytes:
+        """Generate double SHA256 checksum."""
+        return hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+
+    @classmethod
+    def base58_encode_with_checksum(cls, version: bytes, payload: bytes) -> str:
+        """Encode data with version byte and checksum in base58."""
+        combined = version + payload
+        checksum = cls.generate_checksum(combined)
+        final = combined + checksum
+        return base58.b58encode(final).decode('utf-8')
+
+    @classmethod
+    def derive_addresses(cls, seed: bytes, path: str = "m/44'/0'/0'/0/0") -> Dict[str, Union[str, float]]:
+        """
+        Derive Bitcoin addresses from seed using BIP44 derivation path.
+        For educational purposes, we're generating deterministic but mock addresses.
+        In production, this would use proper BIP32/44/84 derivation.
+        """
+        # Generate deterministic keys based on the seed and path
+        key_material = hmac.new(seed, path.encode(), hashlib.sha512).digest()
+        private_key = key_material[:32]
+        chain_code = key_material[32:]
+
+        # Generate mock public key (in real implementation, this would use secp256k1)
+        public_key = hashlib.sha256(private_key).digest()
+
+        # Generate different address formats
+        public_key_hash = hashlib.new('ripemd160', hashlib.sha256(public_key).digest()).digest()
+
+        # P2PKH address (Legacy)
+        version_byte = b'\x00'  # mainnet
+        legacy_address = cls.base58_encode_with_checksum(version_byte, public_key_hash)
+
+        # P2SH address (SegWit)
+        script_version = b'\x05'  # mainnet
+        segwit_address = cls.base58_encode_with_checksum(script_version, public_key_hash)
+
+        # Native SegWit (mock bech32 implementation)
+        native_segwit = f"bc1{public_key_hash.hex()[:32]}"
+
+        # Generate mock transaction history (deterministic based on chain_code)
+        last_tx_days = int.from_bytes(hashlib.sha256(chain_code).digest()[:4], 'big') % 365
+        last_transaction = (datetime.now() - timedelta(days=last_tx_days)).strftime("%Y-%m-%d")
+
+        # Educational balance generation (deterministic based on address)
+        balance = float(int.from_bytes(hashlib.sha256(public_key).digest()[:8], 'big')) / 10**12
+
+        return {
+            "private_key": private_key.hex(),
+            "public_key": public_key.hex(),
+            "legacy_address": legacy_address,
+            "segwit_address": segwit_address,
+            "native_segwit": native_segwit,
+            "last_transaction": last_transaction,
+            "balance": balance
+        }
 
     @classmethod
     def load_config(cls):
@@ -118,52 +177,6 @@ class BitcoinUtils:
                 f"Mock Network: {cls.MOCK_NETWORK}\n"
                 f"Mock Blocks: {cls.MOCK_BLOCKCHAIN_HEIGHT}"
             )
-
-    @classmethod
-    def derive_addresses(cls, seed: bytes, path: str = "m/44'/0'/0'/0/0") -> Dict[str, Union[str, float]]:
-        """
-        Derive Bitcoin addresses from seed using BIP44 derivation path.
-        For educational purposes, we're generating deterministic but mock addresses.
-        In production, this would use proper BIP32/44/84 derivation.
-        """
-        # Generate deterministic keys based on the seed and path
-        key_material = hmac.new(seed, path.encode(), hashlib.sha512).digest()
-        private_key = key_material[:32]
-        chain_code = key_material[32:]
-
-        # Generate mock public key (in real implementation, this would use secp256k1)
-        public_key = hashlib.sha256(private_key).digest()
-
-        # Generate different address formats
-        public_key_hash = hashlib.new('ripemd160', hashlib.sha256(public_key).digest()).digest()
-
-        # P2PKH address
-        version_byte = b'\x00'  # mainnet
-        legacy_address = base58check.encode(version_byte + public_key_hash)  # Changed from b58encode_check
-
-        # P2SH address (mock implementation)
-        script_version = b'\x05'  # mainnet
-        segwit_address = base58check.encode(script_version + public_key_hash)  # Changed from b58encode_check
-
-        # Native SegWit (mock bech32 implementation)
-        native_segwit = f"bc1{public_key_hash.hex()[:32]}"
-
-        # Generate mock transaction history (deterministic based on chain_code)
-        last_tx_days = int.from_bytes(hashlib.sha256(chain_code).digest()[:4], 'big') % 365
-        last_transaction = (datetime.now() - timedelta(days=last_tx_days)).strftime("%Y-%m-%d")
-
-        # Educational balance generation (deterministic based on address)
-        balance = float(int.from_bytes(hashlib.sha256(public_key).digest()[:8], 'big')) / 10**12
-
-        return {
-            "private_key": private_key.hex(),
-            "public_key": public_key.hex(),
-            "legacy_address": legacy_address,
-            "segwit_address": segwit_address,
-            "native_segwit": native_segwit,
-            "last_transaction": last_transaction,
-            "balance": balance
-        }
 
     @classmethod
     def check_balance(cls, address: str) -> Optional[float]:
