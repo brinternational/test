@@ -195,3 +195,16 @@ class WalletScanner:
             return True, "Changes committed and pushed to git successfully"
         except subprocess.CalledProcessError as e:
             return False, f"Git operation failed: {str(e)}"
+
+    def set_thread_count(self, count: int):
+        """Set the number of scanning threads."""
+        if count < 1:
+            raise ValueError("Thread count must be at least 1")
+
+        with self._lock:
+            self.thread_count = count
+
+            # If scanning is active, restart with new thread count
+            if self.scanning:
+                self.stop_scan()
+                self.start_scan()

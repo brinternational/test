@@ -354,26 +354,35 @@ class WalletFrame(ttk.Frame):
             messagebox.showerror("Error", error_msg)
 
     def toggle_scanning(self):
+        """Toggle wallet scanning on/off."""
         if not self.wallet_scanner.scanning:
+            # Start scanning
             self.wallet_scanner.start_scan()
             self.scan_button.config(text="Stop Scanning")
             self.progress.start()
-            self.after(1000, self.update_statistics)
+            self.thread_spinbox.config(state='disabled')  # Disable during scanning
+            self.update_statistics()
         else:
+            # Stop scanning
             self.wallet_scanner.stop_scan()
             self.scan_button.config(text="Start Scanning")
             self.progress.stop()
+            self.thread_spinbox.config(state='normal')  # Re-enable after stopping
 
     def update_statistics(self):
+        """Update scanning statistics display."""
         if self.wallet_scanner.scanning:
             stats = self.wallet_scanner.get_statistics()
             self.stats_text.set(
-                f"Total Scanned: {stats['total_scanned']} | "
+                f"Total Scanned: {stats['total_scanned']:,} | "
                 f"With Balance: {stats['wallets_with_balance']} | "
-                f"Rate: {stats['scan_rate']} wallets/min | "
-                f"Active Threads: {stats['active_threads']}"
+                f"Rate: {stats['scan_rate']:.1f} wallets/min | "
+                f"Active Threads: {stats['active_threads']} | "
+                f"Queue: {stats['queue_size']}"
             )
-            self.after(1000, self.update_statistics)
+
+            # Continue updating while scanning
+            self.after(100, self.update_statistics)  # Update more frequently
 
     def test_node_connection(self):
         """Test connection to Bitcoin node and show result."""
@@ -394,8 +403,14 @@ class WalletFrame(ttk.Frame):
         """Update the number of scanning threads."""
         try:
             new_count = int(self.thread_spinbox.get())
+            if new_count < 1:
+                raise ValueError("Thread count must be at least 1")
+
             self.wallet_scanner.set_thread_count(new_count)
-            self.update_statistics()  # Update UI immediately
+
+            # Update statistics immediately
+            self.update_statistics()
+
         except ValueError as e:
             messagebox.showerror("Error", str(e))
             self.thread_spinbox.set(self.wallet_scanner.thread_count)
