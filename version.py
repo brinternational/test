@@ -2,7 +2,7 @@
 from datetime import datetime
 
 # Semantic versioning
-VERSION = "0.3.0"  # Added GPU acceleration support
+VERSION = "0.3.1"  # Added NPU acceleration support alongside GPU
 BUILD_TIMESTAMP = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Updated whenever version.py is modified
 
 def get_version_info():
