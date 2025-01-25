@@ -56,16 +56,34 @@ class WalletScanner:
         self.wallet_queue = Queue(maxsize=1000)  # Reduced queue size for more frequent node checks
         self.result_queue = multiprocessing.Queue()
 
+        # Initialize shared counters
         self.shared_total = multiprocessing.Value('i', 0)
         self.shared_balance_count = multiprocessing.Value('i', 0)
         self.cpu_processed = multiprocessing.Value('i', 0)
         self.gpu_processed = multiprocessing.Value('i', 0)
 
+        # Initialize scan rate tracking
         self.cpu_scan_rates = deque(maxlen=10)
         self.gpu_scan_rates = deque(maxlen=10)
         self.scan_rates = deque(maxlen=10)  # Combined rates
-        self.last_cpu_time = None
-        self.last_gpu_time = None
+        self.last_cpu_time = time.time()
+        self.last_gpu_time = time.time()
+
+    @property
+    def cpu_scan_rate(self):
+        """Calculate current CPU scan rate."""
+        with self._lock:
+            if not self.cpu_scan_rates:
+                return 0
+            return sum(self.cpu_scan_rates) / len(self.cpu_scan_rates)
+
+    @property
+    def gpu_scan_rate(self):
+        """Calculate current GPU scan rate."""
+        with self._lock:
+            if not self.gpu_scan_rates:
+                return 0
+            return sum(self.gpu_scan_rates) / len(self.gpu_scan_rates)
 
     def verify_wallet(self, address: str) -> float:
         """Verify wallet against live node."""
@@ -235,26 +253,44 @@ class WalletScanner:
         return results
 
     def _scan_worker(self):
+        """CPU scan worker implementation."""
         logging.info(f"Instance {self.instance_id}: CPU Scan worker started")
+        local_start_time = time.time()
+        local_processed = 0
+
         while self.scanning:
             try:
                 batch = self.wallet_queue.get(timeout=0.01)
                 if batch:
                     results = self._process_batch_cpu(batch[:self.CPU_BATCH_SIZE])
+
+                    # Update CPU processing statistics
                     with self.cpu_processed.get_lock():
                         self.cpu_processed.value += len(batch)
+                        local_processed += len(batch)
+
+                        # Update CPU scan rate
                         current_time = time.time()
-                        if self.last_cpu_time:
-                            rate = len(batch) / (current_time - self.last_cpu_time)
-                            self.cpu_scan_rates.append(rate)
-                        self.last_cpu_time = current_time
+                        time_diff = current_time - local_start_time
+                        if time_diff >= 1.0:  # Update rate every second
+                            rate = local_processed / time_diff
+                            with self._lock:
+                                self.cpu_scan_rates.append(rate)
+                                self.scan_rates.append(rate)  # Update combined rates
+                            local_processed = 0
+                            local_start_time = current_time
+
+                    # Update total statistics
                     with self.shared_total.get_lock():
                         self.shared_total.value += len(batch)
                     with self.shared_balance_count.get_lock():
                         self.shared_balance_count.value += len(results)
+
+                    # Save results if any found
                     if results:
                         for result in results:
                             self._save_to_file(result)
+
             except Empty:
                 time.sleep(0.0001)
             except Exception as e:
@@ -384,10 +420,10 @@ class WalletScanner:
                 BitcoinUtils.verify_live_node()
                 node_info = BitcoinUtils.get_node_info()
 
-                cpu_rate = sum(self.cpu_scan_rates) / len(self.cpu_scan_rates) if self.cpu_scan_rates else 0
+                cpu_rate = self.cpu_scan_rate
                 cpu_rate_per_min = cpu_rate * 60 if cpu_rate > 0 else 0
 
-                gpu_rate = sum(self.gpu_scan_rates) / len(self.gpu_scan_rates) if self.gpu_scan_rates else 0
+                gpu_rate = self.gpu_scan_rate
                 gpu_rate_per_min = gpu_rate * 60 if gpu_rate > 0 else 0
 
                 return {
