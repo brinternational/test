@@ -40,7 +40,13 @@ class InstanceController:
             return False
 
     def stop_instance(self, instance_id: str) -> bool:
+        """Stop a specific instance by ID."""
+        if not instance_id:
+            logging.error("Invalid instance ID provided")
+            return False
+
         if instance_id not in self.instances:
+            logging.error(f"Instance {instance_id} not found")
             return False
 
         try:
@@ -51,9 +57,12 @@ class InstanceController:
                 process.terminate()
             process.wait(timeout=5)
             del self.instances[instance_id]
-            logging.info(f"Stopped instance: {instance_id}")
+            logging.info(f"Successfully stopped instance: {instance_id}")
             return True
 
+        except subprocess.TimeoutExpired:
+            logging.error(f"Timeout while stopping instance {instance_id}")
+            return False
         except Exception as e:
             logging.error(f"Failed to stop instance {instance_id}: {str(e)}")
             return False
@@ -192,16 +201,21 @@ class InstanceManagerFrame(ttk.Frame):
 
     def handle_click(self, event):
         """Handle click events on the treeview."""
-        region = self.tree.identify("region", event.x, event.y)
-        if region == "cell":
-            column = self.tree.identify_column(event.x)
-            item = self.tree.identify_row(event.y)
-            if column == "#9":  # Action column
-                instance_id = self.tree.item(item)['values'][0]
-                if self.controller.stop_instance(instance_id):
-                    self.status_var.set(f"Stopped instance {instance_id}")
-                else:
-                    self.status_var.set(f"Failed to stop instance {instance_id}")
+        try:
+            region = self.tree.identify("region", event.x, event.y)
+            if region == "cell":
+                column = self.tree.identify_column(event.x)
+                item = self.tree.identify_row(event.y)
+                if column == "#9":  # Action column
+                    instance_id = self.tree.item(item)['values'][0]
+                    if instance_id:
+                        if self.controller.stop_instance(instance_id):
+                            self.status_var.set(f"Successfully stopped instance {instance_id}")
+                        else:
+                            self.status_var.set(f"Failed to stop instance {instance_id}")
+        except Exception as e:
+            logging.error(f"Error handling instance stop click: {str(e)}")
+            self.status_var.set("Error stopping instance. Check logs for details.")
 
     def update_instance_list(self):
         # Clear existing items
