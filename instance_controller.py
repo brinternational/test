@@ -174,6 +174,9 @@ class InstanceManagerFrame(ttk.Frame):
         )
         status_label.grid(row=3, column=0, pady=5)
 
+        # Bind click event for stop buttons
+        self.tree.bind('<ButtonRelease-1>', self.handle_click)
+
         # Start auto-refresh
         self.update_instance_list()
 
@@ -187,6 +190,19 @@ class InstanceManagerFrame(ttk.Frame):
         self.controller.stop_all_instances()
         self.status_var.set(f"Stopped all instances ({datetime.now().strftime('%H:%M:%S')})")
 
+    def handle_click(self, event):
+        """Handle click events on the treeview."""
+        region = self.tree.identify("region", event.x, event.y)
+        if region == "cell":
+            column = self.tree.identify_column(event.x)
+            item = self.tree.identify_row(event.y)
+            if column == "#9":  # Action column
+                instance_id = self.tree.item(item)['values'][0]
+                if self.controller.stop_instance(instance_id):
+                    self.status_var.set(f"Stopped instance {instance_id}")
+                else:
+                    self.status_var.set(f"Failed to stop instance {instance_id}")
+
     def update_instance_list(self):
         # Clear existing items
         for item in self.tree.get_children():
@@ -194,6 +210,13 @@ class InstanceManagerFrame(ttk.Frame):
 
         # Add current instances
         for info in self.controller.get_instances_info():
+            # Handle the memory_percent formatting
+            memory_percent = info.get('memory_percent', 'N/A')
+            if isinstance(memory_percent, (int, float)):
+                memory_display = f"{memory_percent:.1f}%"
+            else:
+                memory_display = "N/A"
+
             self.tree.insert(
                 "",
                 tk.END,
@@ -201,12 +224,12 @@ class InstanceManagerFrame(ttk.Frame):
                     info['id'],
                     info['pid'],
                     f"{info.get('cpu_percent', 'N/A')}%",
-                    f"{info.get('memory_percent', 'N/A'):.1f}%",
+                    memory_display,
                     info.get('scan_rate', 'N/A'),
                     info.get('wallets_scanned', 'N/A'),
                     info.get('wallets_with_balance', 'N/A'),
                     info['status'],
-                    "Stop"
+                    "Stop"  # Clickable stop button
                 )
             )
 
