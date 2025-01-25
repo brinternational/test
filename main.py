@@ -17,6 +17,53 @@ logging.basicConfig(
     ]
 )
 
+class SummaryTab(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setup_ui()
+        self.start_update_thread()
+
+    def setup_ui(self):
+        # Configure grid
+        self.grid_columnconfigure(0, weight=1)
+
+        # Status Frame
+        status_frame = ttk.LabelFrame(self, text="Overall Statistics")
+        status_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+
+        self.stats_text = tk.Text(status_frame, height=12, width=50)
+        self.stats_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
+
+    def start_update_thread(self):
+        self.update_thread = threading.Thread(target=self.update_stats, daemon=True)
+        self.update_thread.start()
+
+    def update_stats(self):
+        while True:
+            try:
+                if hasattr(self, 'stats_text') and hasattr(self, 'get_combined_stats'):
+                    stats = self.get_combined_stats()
+                    if stats:
+                        stats_text = (
+                            f"=== Combined Statistics ===\n"
+                            f"Active Scanners: {stats['active_scanners']}\n"
+                            f"Total Scanned: {stats['total_scanned']}\n"
+                            f"Total CPU Processed: {stats['cpu_processed']}\n"
+                            f"Total GPU Processed: {stats['gpu_processed']}\n"
+                            f"Total Found Wallets: {stats['wallets_with_balance']}\n"
+                            f"Combined CPU Rate: {stats['cpu_scan_rate']}/min\n"
+                            f"Combined GPU Rate: {stats['gpu_scan_rate']}/min\n"
+                            f"Total Queue Size: {stats['queue_size']}\n"
+                            f"Last Updated: {datetime.now().strftime('%H:%M:%S')}\n"
+                            f"========================="
+                        )
+                        self.stats_text.delete(1.0, tk.END)
+                        self.stats_text.insert(tk.END, stats_text)
+            except Exception as e:
+                logging.error(f"Error updating summary stats: {str(e)}")
+            finally:
+                threading.Event().wait(1.0)
+
 class WalletScannerTab(ttk.Frame):
     def __init__(self, parent, tab_id: str):
         super().__init__(parent)
@@ -43,6 +90,21 @@ class WalletScannerTab(ttk.Frame):
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         self.stop_btn['state'] = 'disabled'
 
+        # Thread count control
+        thread_frame = ttk.Frame(status_frame)
+        thread_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(thread_frame, text="Threads:").pack(side=tk.LEFT, padx=5)
+        self.thread_var = tk.StringVar(value="4")
+        thread_spinbox = ttk.Spinbox(
+            thread_frame, 
+            from_=1, 
+            to=16, 
+            textvariable=self.thread_var,
+            width=5,
+            command=self.update_threads
+        )
+        thread_spinbox.pack(side=tk.LEFT, padx=5)
+
         # Statistics Frame
         stats_frame = ttk.LabelFrame(self, text="Statistics")
         stats_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
@@ -53,6 +115,13 @@ class WalletScannerTab(ttk.Frame):
         # Start statistics update thread
         self.update_thread = threading.Thread(target=self.update_stats, daemon=True)
         self.update_thread.start()
+
+    def update_threads(self):
+        try:
+            threads = int(self.thread_var.get())
+            self.scanner.set_thread_count(threads)
+        except ValueError:
+            pass
 
     def start_scanning(self):
         try:
@@ -121,7 +190,14 @@ class BitcoinEducationApp(tk.Tk):
         # Dictionary to store tabs
         self.tabs: Dict[str, WalletScannerTab] = {}
 
-        # Create initial tab
+        # Create summary tab
+        self.summary_tab = SummaryTab(self.notebook)
+        self.notebook.add(self.summary_tab, text="Summary")
+
+        # Add get_combined_stats method to summary tab
+        self.summary_tab.get_combined_stats = self.get_combined_stats
+
+        # Create initial scanner tab
         self.add_scanner_tab()
 
     def setup_controls(self):
@@ -140,6 +216,43 @@ class BitcoinEducationApp(tk.Tk):
             command=self.remove_current_tab
         ).pack(side=tk.LEFT, padx=5)
 
+    def get_combined_stats(self):
+        """Combine statistics from all running scanners."""
+        if not self.tabs:
+            return None
+
+        combined_stats = {
+            'active_scanners': len(self.tabs),
+            'total_scanned': 0,
+            'cpu_processed': 0,
+            'gpu_processed': 0,
+            'wallets_with_balance': 0,
+            'cpu_scan_rate': 0,
+            'gpu_scan_rate': 0,
+            'queue_size': 0
+        }
+
+        for tab in self.tabs.values():
+            stats = tab.scanner.get_statistics()
+            combined_stats['total_scanned'] += int(stats['total_scanned'].replace(',', ''))
+            combined_stats['cpu_processed'] += int(stats['cpu_processed'].replace(',', ''))
+            combined_stats['gpu_processed'] += int(stats['gpu_processed'].replace(',', ''))
+            combined_stats['wallets_with_balance'] += int(stats['wallets_with_balance'].replace(',', ''))
+            combined_stats['cpu_scan_rate'] += float(stats['cpu_scan_rate'])
+            combined_stats['gpu_scan_rate'] += float(stats['gpu_scan_rate'])
+            combined_stats['queue_size'] += int(stats['queue_size'].replace(',', ''))
+
+        # Format numbers for display
+        combined_stats['total_scanned'] = f"{combined_stats['total_scanned']:,}"
+        combined_stats['cpu_processed'] = f"{combined_stats['cpu_processed']:,}"
+        combined_stats['gpu_processed'] = f"{combined_stats['gpu_processed']:,}"
+        combined_stats['wallets_with_balance'] = f"{combined_stats['wallets_with_balance']:,}"
+        combined_stats['cpu_scan_rate'] = f"{combined_stats['cpu_scan_rate']:.1f}"
+        combined_stats['gpu_scan_rate'] = f"{combined_stats['gpu_scan_rate']:.1f}"
+        combined_stats['queue_size'] = f"{combined_stats['queue_size']:,}"
+
+        return combined_stats
+
     def add_scanner_tab(self):
         if len(self.tabs) >= 4:  # Limit to 4 scanners
             messagebox.showwarning(
@@ -156,7 +269,7 @@ class BitcoinEducationApp(tk.Tk):
 
     def remove_current_tab(self):
         current_tab = self.notebook.select()
-        if not current_tab:
+        if not current_tab or str(current_tab) == str(self.summary_tab):
             return
 
         tab_id = None
