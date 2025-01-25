@@ -30,9 +30,9 @@ if errorlevel 1 (
 REM Change to the project directory
 cd test
 
-REM Install required package
+REM Install required packages
 echo Installing required packages...
-pip install python-bitcoinrpc
+pip install python-bitcoinrpc flask numpy psutil pyopencl
 if errorlevel 1 (
     echo Failed to install packages
     pause
