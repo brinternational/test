@@ -103,26 +103,40 @@ class WalletScanner:
         }
 
     def _set_process_priority(self):
+        """Set process priority and affinity for multi-instance support."""
         try:
             if os.name == 'nt':
                 import ctypes
                 import ctypes.wintypes
 
+                # Define SYSTEM_INFO structure
+                class SYSTEM_INFO(ctypes.Structure):
+                    _fields_ = [
+                        ("wProcessorArchitecture", ctypes.wintypes.WORD),
+                        ("wReserved", ctypes.wintypes.WORD),
+                        ("dwPageSize", ctypes.wintypes.DWORD),
+                        ("lpMinimumApplicationAddress", ctypes.c_void_p),
+                        ("lpMaximumApplicationAddress", ctypes.c_void_p),
+                        ("dwActiveProcessorMask", ctypes.c_void_p),
+                        ("dwNumberOfProcessors", ctypes.wintypes.DWORD),
+                        ("dwProcessorType", ctypes.wintypes.DWORD),
+                        ("dwAllocationGranularity", ctypes.wintypes.DWORD),
+                        ("wProcessorLevel", ctypes.wintypes.WORD),
+                        ("wProcessorRevision", ctypes.wintypes.WORD)
+                    ]
+
                 process = ctypes.windll.kernel32.GetCurrentProcess()
                 ctypes.windll.kernel32.SetPriorityClass(process, 0x00008000)
 
-                system_info = ctypes.wintypes.SYSTEM_INFO()
+                system_info = SYSTEM_INFO()
                 ctypes.windll.kernel32.GetSystemInfo(ctypes.byref(system_info))
 
-                usable_cores = max(system_info.dwNumberOfProcessors // 2, 1)
+                # Respect user-defined thread count, but don't exceed system limit
+                usable_cores = min(self.cpu_thread_count, system_info.dwNumberOfProcessors)
                 processor_mask = ((1 << usable_cores) - 1)
 
                 ctypes.windll.kernel32.SetProcessAffinityMask(process, processor_mask)
-
                 logging.info(f"Instance {self.instance_id}: Using {usable_cores} of {system_info.dwNumberOfProcessors} cores")
-
-                self.cpu_thread_count = usable_cores
-                self.CPU_BATCH_SIZE = max(1000 * self.cpu_thread_count, 2500)
 
             else:
                 os.nice(10)

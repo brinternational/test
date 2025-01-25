@@ -230,124 +230,116 @@ class WalletFrame(ttk.Frame):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.grid_rowconfigure(0, weight=1)
 
-        # Instance information frame
-        instance_frame = ttk.LabelFrame(scrollable_frame, text="Instance Information")
-        instance_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        ttk.Label(
-            instance_frame,
-            text=f"Instance ID: {self.instance_info['instance_id']} | "
-                 f"Instance #: {self.instance_info['instance_number']} | "
-                 f"File: {self.instance_info['wallet_file']} | "
-                 f"CPU Threads: {self.instance_info['cpu_threads']} | "
-                 f"GPU: {'Enabled' if self.instance_info['gpu_enabled'] else 'Disabled'}",
-            style='Info.TLabel'
-        ).pack(padx=5, pady=5)
-
-        # Title and mode indicator in header frame
-        header = ttk.Frame(scrollable_frame)
-        header.pack(fill=tk.X, padx=10, pady=5)
+        # Header frame with title and instance info
+        header_frame = ttk.Frame(scrollable_frame)
+        header_frame.pack(fill=tk.X, padx=5, pady=2)
 
         title = ttk.Label(
-            header,
+            header_frame,
             text=f"Bitcoin Wallet Scanner (Instance: {self.instance_info['instance_id']})",
             style="Title.TLabel"
         )
         title.pack(side=tk.LEFT)
 
-        # Remove mode label since we don't need it
-        self.mode_label = ttk.Label(
-            header,
-            text="",
-            style="Topic.TLabel"
+        # Compact instance info and controls frame
+        info_controls_frame = ttk.Frame(scrollable_frame)
+        info_controls_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        # Left side: Instance info
+        info_frame = ttk.Frame(info_controls_frame)
+        info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.instance_info_label = ttk.Label(
+            info_frame,
+            text=self._get_instance_info_text(),
+            style='Info.TLabel'
         )
-        self.mode_label.pack(side=tk.RIGHT)
+        self.instance_info_label.pack(side=tk.LEFT, padx=2)
 
+        # Right side: Controls
+        controls_frame = ttk.Frame(info_controls_frame)
+        controls_frame.pack(side=tk.RIGHT, padx=2)
 
-        # Prominent scan button
-        self.scan_button = ttk.Button(
-            scrollable_frame,
-            text="▶ Start Scanning",
-            command=self.toggle_scanning,
-            style='Action.TButton',
-            cursor="hand2",
-            width=25  # Make button wider
-        )
-        self.scan_button.pack(pady=10, padx=10, fill=tk.X)
-
-        # Hardware acceleration frame
-        accel_frame = ttk.LabelFrame(scrollable_frame, text="Hardware Settings")
-        accel_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        # Acceleration options
-        options_frame = ttk.Frame(accel_frame)
-        options_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.cpu_var = tk.BooleanVar(value=True)
-        self.gpu_var = tk.BooleanVar(value=False)
-        self.npu_var = tk.BooleanVar(value=False)
-
-        for text, var in [("CPU", self.cpu_var), ("GPU", self.gpu_var), ("NPU", self.npu_var)]:
-            frame = ttk.Frame(options_frame)
-            frame.pack(side=tk.LEFT, padx=5)
-
-            ttk.Checkbutton(
-                frame,
-                text=text,
-                variable=var,
-                command=self.update_acceleration,
-                style='Clickable.TCheckbutton'
-            ).pack(side=tk.LEFT)
-
-        # Thread control with label
-        thread_frame = ttk.Frame(accel_frame)
-        thread_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Label(thread_frame, text="Thread Count:").pack(side=tk.LEFT, padx=5)
+        # Thread control
+        ttk.Label(controls_frame, text="Threads:").pack(side=tk.LEFT, padx=2)
         self.thread_spinbox = ttk.Spinbox(
-            thread_frame,
+            controls_frame,
             from_=1,
             to=16,
             width=3,
             command=self.update_thread_count
         )
         self.thread_spinbox.set(4)
-        self.thread_spinbox.pack(side=tk.LEFT)
+        self.thread_spinbox.pack(side=tk.LEFT, padx=2)
 
+        # Hardware acceleration options
+        accel_frame = ttk.Frame(controls_frame)
+        accel_frame.pack(side=tk.LEFT, padx=5)
 
-        # Progress frame
-        progress_frame = ttk.LabelFrame(scrollable_frame, text="Progress")
-        progress_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.cpu_var = tk.BooleanVar(value=True)
+        self.gpu_var = tk.BooleanVar(value=False)
+        self.npu_var = tk.BooleanVar(value=False)
 
+        for text, var in [("CPU", self.cpu_var), ("GPU", self.gpu_var), ("NPU", self.npu_var)]:
+            ttk.Checkbutton(
+                accel_frame,
+                text=text,
+                variable=var,
+                command=self.update_acceleration,
+                style='Clickable.TCheckbutton'
+            ).pack(side=tk.LEFT, padx=2)
+
+        # Scan control and status frame
+        scan_status_frame = ttk.Frame(scrollable_frame)
+        scan_status_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        # Left side: Scan button
+        self.scan_button = ttk.Button(
+            scan_status_frame,
+            text="▶ Start Scanning",
+            command=self.toggle_scanning,
+            style='Action.TButton',
+            cursor="hand2",
+            width=15
+        )
+        self.scan_button.pack(side=tk.LEFT, padx=2)
+
+        # Right side: Rate display
+        self.rate_label = ttk.Label(
+            scan_status_frame,
+            text="Rate: Waiting to start...",
+            style='Info.TLabel'
+        )
+        self.rate_label.pack(side=tk.RIGHT, padx=2)
+
+        # Progress and stats in a single frame
+        progress_stats_frame = ttk.Frame(scrollable_frame)
+        progress_stats_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        # Progress bar
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(
-            progress_frame,
+            progress_stats_frame,
             variable=self.progress_var,
             mode='indeterminate'
         )
-        self.progress.pack(fill=tk.X, padx=5, pady=5)
+        self.progress.pack(fill=tk.X, pady=2)
 
-        # Statistics display
-        stats_frame = ttk.LabelFrame(scrollable_frame, text="Statistics")
-        stats_frame.pack(fill=tk.X, padx=10, pady=5)
-
+        # Statistics label
         self.stats_text = tk.StringVar(value="Click 'Start Scanning' to begin")
         ttk.Label(
-            stats_frame,
+            progress_stats_frame,
             textvariable=self.stats_text,
             wraplength=400
-        ).pack(padx=5, pady=5)
+        ).pack(fill=tk.X, pady=2)
 
-        # Results area
-        results_frame = ttk.LabelFrame(scrollable_frame, text="Results")
-        results_frame.pack(fill=tk.BOTH, padx=10, pady=5)
-
+        # Results area (more compact)
         self.results_display = ttk.Label(
-            results_frame,
+            scrollable_frame,
             text="Scanning results will appear here",
             wraplength=400
         )
-        self.results_display.pack(padx=5, pady=5)
+        self.results_display.pack(fill=tk.X, padx=5, pady=2)
 
     def toggle_scanning(self):
         """Toggle wallet scanning on/off."""
@@ -389,20 +381,25 @@ class WalletFrame(ttk.Frame):
         """Update scanning statistics display."""
         if self.wallet_scanner.scanning:
             stats = self.wallet_scanner.get_statistics()
-            cpu_rate = stats['cpu_scan_rate']
-            gpu_rate = stats['gpu_scan_rate']
+            cpu_rate = float(stats['cpu_scan_rate'])
+            gpu_rate = float(stats['gpu_scan_rate'])
+            total_rate = cpu_rate + gpu_rate
+
+            # Update rate label
+            self.rate_label.config(
+                text=f"Processing Rate: {total_rate:,.1f} wallets/min "
+                     f"(CPU: {cpu_rate:,.1f}/min, GPU: {gpu_rate:,.1f}/min)"
+            )
 
             self.stats_text.set(
                 f"Total Scanned: {stats['total_scanned']} | "
                 f"With Balance: {stats['wallets_with_balance']} | "
-                f"CPU Rate: {cpu_rate} w/min | "
-                f"GPU Rate: {gpu_rate} w/min | "
                 f"Active Threads: {stats['active_threads']} | "
                 f"Queue: {stats['queue_size']}"
             )
 
             # Continue updating while scanning
-            self.after(100, self.update_statistics)  # Update more frequently
+            self.after(100, self.update_statistics)
 
     def update_thread_count(self):
         """Update the number of scanning threads."""
@@ -412,11 +409,13 @@ class WalletFrame(ttk.Frame):
                 raise ValueError("Thread count must be at least 1")
 
             self.wallet_scanner.set_thread_count(new_count)
+            self.instance_info = self.wallet_scanner.get_instance_info()  # Refresh instance info
+            self.instance_info_label.config(text=self._get_instance_info_text())
             self.update_statistics()
 
         except ValueError as e:
             messagebox.showerror("Error", str(e))
-            self.thread_spinbox.set(self.wallet_scanner.thread_count)
+            self.thread_spinbox.set(new_count)  # Set to actual value being used
 
     def update_acceleration(self):
         """Update hardware acceleration preferences."""
@@ -439,6 +438,16 @@ class WalletFrame(ttk.Frame):
         if self.wallet_scanner.scanning:
             self.wallet_scanner.stop_scan()
             self.wallet_scanner.start_scan()
+
+    def _get_instance_info_text(self):
+        """Get formatted instance information text."""
+        return (
+            f"Instance ID: {self.instance_info['instance_id']} | "
+            f"Instance #: {self.instance_info['instance_number']} | "
+            f"File: {self.instance_info['wallet_file']} | "
+            f"CPU Threads: {self.instance_info['cpu_threads']} | "
+            f"GPU: {'Enabled' if self.instance_info['gpu_enabled'] else 'Disabled'}"
+        )
 
 class SHA256Frame(ttk.Frame):
     def __init__(self, parent):
