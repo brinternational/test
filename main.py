@@ -68,6 +68,20 @@ class NodeSettingsFrame(ttk.Frame):
         self.port_var = tk.StringVar(value=self.bitcoin_utils.NODE_PORT)
         ttk.Entry(port_frame, textvariable=self.port_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
+        # RPC Username
+        user_frame = ttk.Frame(settings_container)
+        user_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(user_frame, text="RPC Username:").pack(side=tk.LEFT, padx=5)
+        self.user_var = tk.StringVar(value=self.bitcoin_utils.RPC_USER)
+        ttk.Entry(user_frame, textvariable=self.user_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        # RPC Password
+        pass_frame = ttk.Frame(settings_container)
+        pass_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(pass_frame, text="RPC Password:").pack(side=tk.LEFT, padx=5)
+        self.pass_var = tk.StringVar(value=self.bitcoin_utils.RPC_PASS)
+        ttk.Entry(pass_frame, textvariable=self.pass_var, show="*").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
         # Wallet Save Location
         wallet_frame = ttk.Frame(settings_container)
         wallet_frame.pack(fill=tk.X, pady=2)
@@ -107,18 +121,20 @@ class NodeSettingsFrame(ttk.Frame):
             self.bitcoin_utils.configure_node(
                 self.url_var.get(),
                 self.port_var.get(),
-                self.bitcoin_utils.RPC_USER,  # Keep existing RPC credentials
-                self.bitcoin_utils.RPC_PASS
+                self.user_var.get(),
+                self.pass_var.get()
             )
 
-            # Save wallet directory
+            # Save wallet directory and all settings
             wallet_dir = self.wallet_dir_var.get()
             os.makedirs(wallet_dir, exist_ok=True)
 
-            # Update config file
+            # Save to config file
             self.bitcoin_utils.save_config(
                 url=self.url_var.get(),
                 port=self.port_var.get(),
+                username=self.user_var.get(),
+                password=self.pass_var.get(),
                 wallet_dir=wallet_dir
             )
 

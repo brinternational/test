@@ -4,24 +4,19 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 import random
-import base58  # Use base58 directly for encoding
+import base58
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 class BitcoinUtils:
     # Config file location
     CONFIG_FILE = r"C:\temp\node_settings.txt"
 
-    # Default testnet node settings (will be overridden by config file if it exists)
+    # Default node settings
     NODE_URL = 'localhost'
     NODE_PORT = '8332'
     RPC_USER = 'your_rpc_username'
     RPC_PASS = 'your_rpc_password'
     _rpc_connection = None
-
-    # Mock data for educational purposes
-    MOCK_MODE = True  # Default to mock mode if node connection fails
-    MOCK_BLOCKCHAIN_HEIGHT = 800000
-    MOCK_NETWORK = "testnet"
 
     @classmethod
     def generate_checksum(cls, payload: bytes) -> bytes:
@@ -83,19 +78,54 @@ class BitcoinUtils:
         }
 
     @classmethod
-    def save_config(cls, url: str, port: str, wallet_dir: str):
+    def test_node_connection(cls) -> Tuple[bool, str]:
+        """Test connection to Bitcoin node."""
+        try:
+            rpc = cls.get_rpc_connection()
+            blockchain_info = rpc.getblockchaininfo()
+
+            network = blockchain_info.get('chain', 'unknown')
+            blocks = blockchain_info.get('blocks', 0)
+            peers = rpc.getconnectioncount()
+
+            return True, (
+                f"Successfully connected to Bitcoin node\n"
+                f"Network: {network}\n"
+                f"Block Height: {blocks:,}\n"
+                f"Connected Peers: {peers}"
+            )
+        except Exception as e:
+            if "ConnectionRefusedError" in str(e):
+                message = "Connection refused. Please check if the Bitcoin node is running."
+            elif "AuthenticationError" in str(e):
+                message = "Authentication failed. Please check your RPC username and password."
+            else:
+                message = f"Connection error: {str(e)}"
+
+            return False, f"Error: {message}"
+
+    @classmethod
+    def save_config(cls, url: str, port: str, username: str, password: str, wallet_dir: str):
         """Save configuration to file."""
         try:
             config_content = f"""# Bitcoin Node Configuration
+# Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 url={url}
 port={port}
-username={cls.RPC_USER}
-password={cls.RPC_PASS}
+username={username}
+password={password}
 wallet_dir={wallet_dir}
 """
             os.makedirs(os.path.dirname(cls.CONFIG_FILE), exist_ok=True)
             with open(cls.CONFIG_FILE, 'w') as f:
                 f.write(config_content)
+
+            # Create wallet directory with timestamp
+            os.makedirs(wallet_dir, exist_ok=True)
+            timestamp_file = os.path.join(wallet_dir, "wallets.txt")
+            with open(timestamp_file, 'a') as f:
+                f.write(f"\nScanner started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
             return True
         except Exception as e:
             print(f"Error saving config: {str(e)}")
@@ -103,7 +133,7 @@ wallet_dir={wallet_dir}
 
     @classmethod
     def load_config(cls):
-        """Load configuration from C:\temp\node_settings.txt"""
+        """Load configuration from file."""
         try:
             if os.path.exists(cls.CONFIG_FILE):
                 with open(cls.CONFIG_FILE, 'r') as f:
@@ -120,11 +150,9 @@ wallet_dir={wallet_dir}
                     cls.RPC_USER = settings.get('username', cls.RPC_USER)
                     cls.RPC_PASS = settings.get('password', cls.RPC_PASS)
 
-                    print(f"Loaded configuration from {cls.CONFIG_FILE}")
                     return True
         except Exception as e:
             print(f"Error loading config: {str(e)}")
-            return False
         return False
 
     @classmethod
@@ -135,16 +163,13 @@ wallet_dir={wallet_dir}
         cls.RPC_USER = rpc_user
         cls.RPC_PASS = rpc_pass
         cls._rpc_connection = None  # Reset connection to use new settings
-        print(f"Node configured: {node_url}:{port}")
 
     @classmethod
     def get_rpc_connection(cls) -> AuthServiceProxy:
         """Get or create RPC connection to Bitcoin node."""
-        # Try to load config first
         if cls._rpc_connection is None:
             cls.load_config()
 
-        if cls._rpc_connection is None:
             if not all([cls.RPC_USER, cls.RPC_PASS]):
                 raise ValueError("Bitcoin node credentials not configured.")
 
@@ -154,91 +179,23 @@ wallet_dir={wallet_dir}
         return cls._rpc_connection
 
     @classmethod
-    def test_node_connection(cls) -> Tuple[bool, str]:
-        """Test connection to Bitcoin node, fallback to mock mode if connection fails."""
-        try:
-            rpc = cls.get_rpc_connection()
-            blockchain_info = rpc.getblockchaininfo()
-
-            # Check if node is syncing
-            if blockchain_info.get('initialblockdownload', True):
-                cls.MOCK_MODE = True
-                return False, (
-                    f"Node is still syncing:\n"
-                    f"Current Height: {blockchain_info.get('blocks', 0)}\n"
-                    f"Headers: {blockchain_info.get('headers', 0)}\n"
-                    f"Progress: {blockchain_info.get('verificationprogress', 0)*100:.2f}%"
-                )
-
-            cls.MOCK_MODE = False
-            network = blockchain_info.get('chain', 'unknown')
-            blocks = blockchain_info.get('blocks', 0)
-            peers = rpc.getconnectioncount()
-
-            return True, (
-                f"Successfully connected to Bitcoin node\n"
-                f"Network: {network}\n"
-                f"Block Height: {blocks:,}\n"
-                f"Connected Peers: {peers}"
-            )
-        except Exception as e:
-            cls.MOCK_MODE = True
-            if "ConnectionRefusedError" in str(e):
-                message = "Connection refused. Please check if the Bitcoin node is running."
-            elif "AuthenticationError" in str(e):
-                message = "Authentication failed. Please check your RPC username and password."
-            else:
-                message = f"Connection error: {str(e)}"
-
-            return False, (
-                f"Using educational simulation mode\n"
-                f"Error: {message}\n"
-                f"Mock Network: {cls.MOCK_NETWORK}\n"
-                f"Mock Blocks: {cls.MOCK_BLOCKCHAIN_HEIGHT}"
-            )
-
-    @classmethod
     def check_balance(cls, address: str) -> Optional[float]:
         """Check balance of a Bitcoin address."""
-        if not cls.MOCK_MODE:
-            try:
-                rpc = cls.get_rpc_connection()
-                balance = rpc.getreceivedbyaddress(address)
-                return float(balance)
-            except Exception as e:
-                print(f"Node error, falling back to mock mode: {str(e)}")
-                cls.MOCK_MODE = True
-
-        # Generate deterministic mock balance based on address
-        address_hash = int(hashlib.sha256(address.encode()).hexdigest()[:8], 16)
-        mock_balance = (address_hash % 1000) / 100 if address_hash % 100 == 0 else 0
-        return mock_balance
+        try:
+            rpc = cls.get_rpc_connection()
+            balance = rpc.getreceivedbyaddress(address)
+            return float(balance)
+        except Exception as e:
+            print(f"Error checking balance: {str(e)}")
+            return None
 
     @classmethod
     def validate_address(cls, address: str) -> bool:
         """Validate Bitcoin address format."""
-        if not cls.MOCK_MODE:
-            try:
-                rpc = cls.get_rpc_connection()
-                result = rpc.validateaddress(address)
-                return result.get('isvalid', False)
-            except:
-                cls.MOCK_MODE = True
-
-        # Basic format checking for educational purposes
-        if not address:
+        try:
+            rpc = cls.get_rpc_connection()
+            result = rpc.validateaddress(address)
+            return result.get('isvalid', False)
+        except Exception as e:
+            print(f"Error validating address: {str(e)}")
             return False
-
-        # Check different address formats
-        valid_prefixes = {
-            '1': 34,  # Legacy
-            '3': 34,  # SegWit
-            'bc1': 42  # Native SegWit
-        }
-
-        # Validate prefix and length
-        for prefix, length in valid_prefixes.items():
-            if address.startswith(prefix):
-                return len(address) == length
-
-        return False
