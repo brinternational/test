@@ -32,18 +32,10 @@ flask_app = Flask(__name__)
 def home():
     return "Bitcoin Education App API"
 
-def find_free_port():
-    """Find an available port for Flask."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
-
 def run_flask():
-    """Run Flask server with automatic port selection."""
+    """Run Flask server with consistent port."""
     try:
-        port = find_free_port()
+        port = 44555  # Using a fixed port
         logging.info(f"Starting Flask server on port {port}")
         flask_app.run(host='0.0.0.0', port=port)
     except Exception as e:
