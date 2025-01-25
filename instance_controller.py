@@ -9,6 +9,7 @@ import uuid
 from typing import Dict, List, Optional
 from datetime import datetime
 from wallet_scanner import WalletScanner
+from process_manager import ProcessPool
 
 
 class InstanceController:
@@ -103,12 +104,20 @@ class InstanceController:
         return info
 
 
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import logging
+import uuid
+from typing import Dict
+from datetime import datetime
+from process_manager import ProcessPool
+
 class ProcessManagerFrame(ttk.Frame):
     def __init__(self, parent, main_app):
         super().__init__(parent)
         self.main_app = main_app
-        self.processes: Dict[str, WalletScanner] = {}
-        self.max_processes = 4
+        self.process_pool = ProcessPool(max_processes=4)
         self.setup_ui()
 
     def setup_ui(self):
@@ -147,10 +156,10 @@ class ProcessManagerFrame(ttk.Frame):
             width=20
         ).pack(side=tk.LEFT, padx=5)
 
-        # Process list with enhanced information
+        # Process list
         self.tree = ttk.Treeview(
             self,
-            columns=("ID", "CPU", "Memory", "Rate", "Scanned", "Found", "Status", "Action"),
+            columns=("ID", "Status", "Time", "Rate", "Scanned", "Found", "Action"),
             show="headings",
             height=6
         )
@@ -158,12 +167,11 @@ class ProcessManagerFrame(ttk.Frame):
         # Configure columns
         columns = [
             ("ID", "Process ID", 100),
-            ("CPU", "CPU %", 70),
-            ("Memory", "Memory %", 80),
-            ("Rate", "Scan Rate", 100),
-            ("Scanned", "Wallets", 80),
-            ("Found", "Found", 70),
             ("Status", "Status", 80),
+            ("Time", "Running Time", 120),
+            ("Rate", "Scan Rate", 100),
+            ("Scanned", "Total Scanned", 100),
+            ("Found", "Wallets Found", 100),
             ("Action", "Action", 80)
         ]
 
@@ -195,23 +203,21 @@ class ProcessManagerFrame(ttk.Frame):
 
     def start_process(self):
         """Start a new wallet scanner process in a new tab."""
-        if len(self.processes) >= self.max_processes:
-            messagebox.showwarning(
-                "Process Limit",
-                f"Maximum number of processes ({self.max_processes}) reached."
-            )
-            return
-
         try:
             process_id = str(uuid.uuid4())[:8]
-            scanner = WalletScanner()
 
-            # Create new tab for this process
-            process_frame = self.main_app.add_process_tab(process_id)
-            if process_frame:
-                self.processes[process_id] = scanner
-                self.status_var.set(f"Started new process {process_id}")
-                logging.info(f"Started new process: {process_id}")
+            # Start the process
+            if self.process_pool.start_process(process_id):
+                # Create new tab for this process
+                process_frame = self.main_app.add_process_tab(process_id)
+                if process_frame:
+                    self.status_var.set(f"Started new process {process_id}")
+                    logging.info(f"Started new process: {process_id}")
+            else:
+                messagebox.showwarning(
+                    "Process Limit",
+                    f"Maximum number of processes ({self.process_pool.max_processes}) reached."
+                )
 
         except Exception as e:
             error_message = f"Failed to start process: {str(e)}"
@@ -220,25 +226,15 @@ class ProcessManagerFrame(ttk.Frame):
 
     def stop_process(self, process_id: str) -> bool:
         """Stop a specific process by ID."""
-        if process_id not in self.processes:
-            return False
-
-        try:
-            scanner = self.processes[process_id]
-            scanner.stop_scan()
+        if self.process_pool.stop_process(process_id):
             self.main_app.remove_process_tab(process_id)
-            del self.processes[process_id]
             logging.info(f"Successfully stopped process: {process_id}")
             return True
-
-        except Exception as e:
-            logging.error(f"Failed to stop process {process_id}: {str(e)}")
-            return False
+        return False
 
     def stop_all_processes(self):
         """Stop all running processes."""
-        process_ids = list(self.processes.keys())
-        for process_id in process_ids:
+        for process_id in list(self.process_pool.processes.keys()):
             self.stop_process(process_id)
         self.status_var.set(f"Stopped all processes ({datetime.now().strftime('%H:%M:%S')})")
 
@@ -249,7 +245,7 @@ class ProcessManagerFrame(ttk.Frame):
             if region == "cell":
                 column = self.tree.identify_column(event.x)
                 item = self.tree.identify_row(event.y)
-                if column == "#8":  # Action column
+                if column == "#7":  # Action column
                     process_id = self.tree.item(item)['values'][0]
                     if process_id:
                         if self.stop_process(process_id):
@@ -262,36 +258,31 @@ class ProcessManagerFrame(ttk.Frame):
 
     def update_process_list(self):
         """Update the process list display."""
-        # Clear existing items
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        try:
+            # Clear existing items
+            for item in self.tree.get_children():
+                self.tree.delete(item)
 
-        # Add current processes
-        for process_id, scanner in self.processes.items():
-            try:
-                stats = scanner.get_statistics()
-
-                # Calculate total scan rate
-                cpu_rate = float(stats.get('cpu_scan_rate', 0))
-                gpu_rate = float(stats.get('gpu_scan_rate', 0))
-                total_rate = f"{cpu_rate + gpu_rate:.1f}/min"
-
-                self.tree.insert(
-                    "",
-                    tk.END,
-                    values=(
-                        process_id,
-                        f"{stats.get('cpu_usage', 'N/A')}%",
-                        f"{stats.get('memory_usage', 'N/A')}%",
-                        total_rate,
-                        stats.get('total_scanned', 'N/A'),
-                        stats.get('wallets_with_balance', 'N/A'),
-                        "Running" if scanner.scanning else "Stopped",
-                        "Stop"
+            # Add current processes
+            for process_id in self.process_pool.processes:
+                stats = self.process_pool.get_process_stats(process_id)
+                if stats:
+                    self.tree.insert(
+                        "",
+                        tk.END,
+                        values=(
+                            process_id,
+                            stats['status'],
+                            stats['start_time'],
+                            f"{float(stats.get('scan_rate', 0)):.1f}/min",
+                            stats.get('total_scanned', 'N/A'),
+                            stats.get('wallets_found', 'N/A'),
+                            "Stop"
+                        )
                     )
-                )
-            except Exception as e:
-                logging.error(f"Error updating process {process_id}: {str(e)}")
+
+        except Exception as e:
+            logging.error(f"Error updating process list: {str(e)}")
 
         # Schedule next update
         self.after(1000, self.update_process_list)
