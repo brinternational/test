@@ -162,39 +162,32 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
             peers = rpc.getconnectioncount()
 
             return True, (
-                f"Successfully connected to Bitcoin node\n"
+                f"Connected to Bitcoin node\n"
                 f"Network: {network}\n"
                 f"Block Height: {blocks:,}\n"
                 f"Connected Peers: {peers}"
             )
         except Exception as e:
-            if "ConnectionRefusedError" in str(e):
+            error_message = str(e)
+            if "ConnectionRefusedError" in error_message:
                 message = "Connection refused. Please check if the Bitcoin node is running."
-            elif "AuthenticationError" in str(e):
+            elif "AuthenticationError" in error_message:
                 message = "Authentication failed. Please check your RPC username and password."
             else:
-                message = f"Connection error: {str(e)}"
+                message = f"Connection error: {error_message}"
 
-            return False, f"Error: {message}"
+            raise ConnectionError(message)
 
     @classmethod
     def check_balance(cls, address: str) -> Optional[float]:
         """Check balance of a Bitcoin address using the node."""
-        try:
-            rpc = cls.get_rpc_connection()
-            balance = rpc.getreceivedbyaddress(address)
-            return float(balance)
-        except Exception as e:
-            print(f"Error checking balance: {str(e)}")
-            return None
+        rpc = cls.get_rpc_connection()
+        balance = rpc.getreceivedbyaddress(address)
+        return float(balance)
 
     @classmethod
     def validate_address(cls, address: str) -> bool:
         """Validate Bitcoin address format using the node."""
-        try:
-            rpc = cls.get_rpc_connection()
-            result = rpc.validateaddress(address)
-            return result.get('isvalid', False)
-        except Exception as e:
-            print(f"Error validating address: {str(e)}")
-            return False
+        rpc = cls.get_rpc_connection()
+        result = rpc.validateaddress(address)
+        return result.get('isvalid', False)
