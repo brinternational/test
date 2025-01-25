@@ -5,7 +5,7 @@ from ui.theme import setup_theme
 from ui.custom_widgets import WalletFrame, NodeSettingsFrame
 from version import get_version_info
 from bitcoin_utils import BitcoinUtils
-from instance_controller import InstanceManagerFrame
+from instance_controller import ProcessManagerFrame  # Updated import
 import logging
 import os
 import threading
@@ -89,7 +89,7 @@ class BitcoinEducationApp(tk.Tk):
 
             # Basic window setup
             self.title(f"Bitcoin Wallet v{version_info['version']}")
-            self.geometry("1024x768")  # Increased default size
+            self.geometry("1024x768")
 
             # Setup theme
             setup_theme(self)
@@ -116,7 +116,7 @@ class BitcoinEducationApp(tk.Tk):
 
             self.connection_icon = ttk.Label(
                 self.connection_frame,
-                text="○",  # Default icon
+                text="○",
                 foreground="#666666"
             )
             self.connection_icon.pack(side=tk.LEFT, padx=(0, 5))
@@ -128,19 +128,20 @@ class BitcoinEducationApp(tk.Tk):
             )
             self.connection_status.pack(side=tk.LEFT)
 
-            # Setup notebook with tabs
+            # Setup main notebook with tabs
             self.notebook = ttk.Notebook(self.container)
             self.notebook.pack(fill=tk.BOTH, expand=True)
 
-            # Create and add frames
-            self.instance_manager_frame = InstanceManagerFrame(self.notebook)
-            self.wallet_frame = WalletFrame(self.notebook)
+            # Create and add process manager frame (replaces instance manager)
+            self.process_manager_frame = ProcessManagerFrame(self.notebook, self)
             self.node_settings_frame = NodeSettingsFrame(self.notebook)
 
-            # Add tabs
-            self.notebook.add(self.instance_manager_frame, text="Instances")
-            self.notebook.add(self.wallet_frame, text="Wallet")
+            # Add main tabs
+            self.notebook.add(self.process_manager_frame, text="Processes")
             self.notebook.add(self.node_settings_frame, text="Node Settings")
+
+            # Dictionary to track process tabs
+            self.process_tabs = {}
 
             # Start connection manager
             self.connection_manager.start()
@@ -156,30 +157,46 @@ class BitcoinEducationApp(tk.Tk):
             messagebox.showerror("Error", f"Failed to start: {str(e)}")
             raise
 
+    def add_process_tab(self, process_id: str):
+        """Add a new process tab to the notebook."""
+        if process_id not in self.process_tabs:
+            process_frame = WalletFrame(self.notebook)
+            self.notebook.add(process_frame, text=f"Process {process_id}")
+            self.process_tabs[process_id] = process_frame
+            self.notebook.select(self.notebook.index(process_frame))
+            return process_frame
+        return None
+
+    def remove_process_tab(self, process_id: str):
+        """Remove a process tab from the notebook."""
+        if process_id in self.process_tabs:
+            process_frame = self.process_tabs[process_id]
+            self.notebook.forget(self.notebook.index(process_frame))
+            del self.process_tabs[process_id]
+
     def update_connection_status(self, connected: bool, message: str, show_warning: bool = False):
         """Update the connection status display."""
         if connected:
             self.connection_status.configure(
                 text="Connected to node",
-                foreground="#388E3C"  # Success green
+                foreground="#388E3C"
             )
             self.connection_icon.configure(
-                text="●",  # Filled circle for connected
+                text="●",
                 foreground="#388E3C"
             )
         else:
             self.connection_status.configure(
                 text="Node connection failed",
-                foreground="#D32F2F"  # Error red
-            )
-            self.connection_icon.configure(
-                text="○",  # Empty circle for disconnected
                 foreground="#D32F2F"
             )
-            # Show warning only if requested and we're not on the node settings tab
+            self.connection_icon.configure(
+                text="○",
+                foreground="#D32F2F"
+            )
             if show_warning and self.notebook.select() != str(self.node_settings_frame):
                 self.show_connection_warning(message)
-                self.notebook.select(2)  # Switch to node settings tab
+                self.notebook.select(1)  # Switch to node settings tab
 
     def show_connection_warning(self, message: str):
         """Display a warning about node connection issues."""
@@ -193,22 +210,13 @@ class BitcoinEducationApp(tk.Tk):
         """Clean up resources before closing."""
         try:
             self.connection_manager.stop()
-            self.instance_manager_frame.controller.stop_all_instances()
-            logging.info("Successfully stopped all instances")
+            for process_id in list(self.process_tabs.keys()):
+                self.remove_process_tab(process_id)
+            logging.info("Successfully stopped all processes")
         except Exception as e:
-            logging.error(f"Error stopping instances: {str(e)}")
+            logging.error(f"Error stopping processes: {str(e)}")
         finally:
             self.destroy()
-
-    def show_about(self):
-        version_info = get_version_info()
-        messagebox.showinfo(
-            "About",
-            f"Bitcoin Wallet Scanner v{version_info['version']}\n"
-            f"Built on: {version_info['build_date']}\n\n"
-            "This application scans for Bitcoin wallets and "
-            "provides educational resources about Bitcoin technology."
-        )
 
 if __name__ == "__main__":
     try:

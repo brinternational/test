@@ -1,13 +1,15 @@
 import subprocess
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import psutil
 import sys
 import os
 import logging
-from typing import Dict, List
+import uuid
+from typing import Dict, List, Optional
 from datetime import datetime
 from wallet_scanner import WalletScanner
+
 
 class InstanceController:
     def __init__(self):
@@ -100,10 +102,13 @@ class InstanceController:
                     })
         return info
 
-class InstanceManagerFrame(ttk.Frame):
-    def __init__(self, parent):
+
+class ProcessManagerFrame(ttk.Frame):
+    def __init__(self, parent, main_app):
         super().__init__(parent)
-        self.controller = InstanceController()
+        self.main_app = main_app
+        self.processes: Dict[str, WalletScanner] = {}
+        self.max_processes = 4
         self.setup_ui()
 
     def setup_ui(self):
@@ -113,12 +118,12 @@ class InstanceManagerFrame(ttk.Frame):
         # Title
         title = ttk.Label(
             self,
-            text="Bitcoin Wallet Scanner - Instance Manager",
+            text="Bitcoin Wallet Scanner - Process Manager",
             style="Title.TLabel"
         )
         title.grid(row=0, column=0, pady=10)
 
-        # Instance status frame
+        # Process status frame
         status_frame = ttk.Frame(self)
         status_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
         status_frame.grid_columnconfigure(0, weight=1)
@@ -129,31 +134,30 @@ class InstanceManagerFrame(ttk.Frame):
 
         ttk.Button(
             btn_frame,
-            text="Start New Instance",
-            command=self.start_instance,
+            text="Start New Process",
+            command=self.start_process,
             style="Action.TButton",
             width=20
         ).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(
             btn_frame,
-            text="Stop All Instances",
-            command=self.stop_all_instances,
+            text="Stop All Processes",
+            command=self.stop_all_processes,
             width=20
         ).pack(side=tk.LEFT, padx=5)
 
-        # Instances list with enhanced information
+        # Process list with enhanced information
         self.tree = ttk.Treeview(
             self,
-            columns=("ID", "PID", "CPU", "Memory", "Rate", "Scanned", "Found", "Status", "Action"),
+            columns=("ID", "CPU", "Memory", "Rate", "Scanned", "Found", "Status", "Action"),
             show="headings",
             height=6
         )
 
         # Configure columns
         columns = [
-            ("ID", "Instance ID", 100),
-            ("PID", "Process ID", 80),
+            ("ID", "Process ID", 100),
             ("CPU", "CPU %", 70),
             ("Memory", "Memory %", 80),
             ("Rate", "Scan Rate", 100),
@@ -175,7 +179,7 @@ class InstanceManagerFrame(ttk.Frame):
         self.tree.configure(yscrollcommand=scrollbar.set)
 
         # Status bar
-        self.status_var = tk.StringVar(value="Ready to start instances")
+        self.status_var = tk.StringVar(value="Ready to start processes")
         status_label = ttk.Label(
             self,
             textvariable=self.status_var,
@@ -187,17 +191,56 @@ class InstanceManagerFrame(ttk.Frame):
         self.tree.bind('<ButtonRelease-1>', self.handle_click)
 
         # Start auto-refresh
-        self.update_instance_list()
+        self.update_process_list()
 
-    def start_instance(self):
-        if self.controller.start_instance():
-            self.status_var.set(f"Started new instance ({datetime.now().strftime('%H:%M:%S')})")
-        else:
-            self.status_var.set("Failed to start instance - maximum limit reached")
+    def start_process(self):
+        """Start a new wallet scanner process in a new tab."""
+        if len(self.processes) >= self.max_processes:
+            messagebox.showwarning(
+                "Process Limit",
+                f"Maximum number of processes ({self.max_processes}) reached."
+            )
+            return
 
-    def stop_all_instances(self):
-        self.controller.stop_all_instances()
-        self.status_var.set(f"Stopped all instances ({datetime.now().strftime('%H:%M:%S')})")
+        try:
+            process_id = str(uuid.uuid4())[:8]
+            scanner = WalletScanner()
+
+            # Create new tab for this process
+            process_frame = self.main_app.add_process_tab(process_id)
+            if process_frame:
+                self.processes[process_id] = scanner
+                self.status_var.set(f"Started new process {process_id}")
+                logging.info(f"Started new process: {process_id}")
+
+        except Exception as e:
+            error_message = f"Failed to start process: {str(e)}"
+            logging.error(error_message)
+            messagebox.showerror("Error", error_message)
+
+    def stop_process(self, process_id: str) -> bool:
+        """Stop a specific process by ID."""
+        if process_id not in self.processes:
+            return False
+
+        try:
+            scanner = self.processes[process_id]
+            scanner.stop_scan()
+            self.main_app.remove_process_tab(process_id)
+            del self.processes[process_id]
+            logging.info(f"Successfully stopped process: {process_id}")
+            return True
+
+        except Exception as e:
+            logging.error(f"Failed to stop process {process_id}: {str(e)}")
+            return False
+
+    def stop_all_processes(self):
+        """Stop all running processes."""
+        process_ids = list(self.processes.keys())
+        for process_id in process_ids:
+            self.stop_process(process_id)
+        self.status_var.set(f"Stopped all processes ({datetime.now().strftime('%H:%M:%S')})")
 
     def handle_click(self, event):
         """Handle click events on the treeview."""
@@ -206,46 +249,49 @@ class InstanceManagerFrame(ttk.Frame):
             if region == "cell":
                 column = self.tree.identify_column(event.x)
                 item = self.tree.identify_row(event.y)
-                if column == "#9":  # Action column
-                    instance_id = self.tree.item(item)['values'][0]
-                    if instance_id:
-                        if self.controller.stop_instance(instance_id):
-                            self.status_var.set(f"Successfully stopped instance {instance_id}")
+                if column == "#8":  # Action column
+                    process_id = self.tree.item(item)['values'][0]
+                    if process_id:
+                        if self.stop_process(process_id):
+                            self.status_var.set(f"Successfully stopped process {process_id}")
                         else:
-                            self.status_var.set(f"Failed to stop instance {instance_id}")
+                            self.status_var.set(f"Failed to stop process {process_id}")
         except Exception as e:
-            logging.error(f"Error handling instance stop click: {str(e)}")
-            self.status_var.set("Error stopping instance. Check logs for details.")
+            logging.error(f"Error handling process stop click: {str(e)}")
+            self.status_var.set("Error stopping process. Check logs for details.")
 
-    def update_instance_list(self):
+    def update_process_list(self):
+        """Update the process list display."""
         # Clear existing items
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # Add current instances
-        for info in self.controller.get_instances_info():
-            # Handle the memory_percent formatting
-            memory_percent = info.get('memory_percent', 'N/A')
-            if isinstance(memory_percent, (int, float)):
-                memory_display = f"{float(memory_percent):.1f}%"
-            else:
-                memory_display = "N/A"
+        # Add current processes
+        for process_id, scanner in self.processes.items():
+            try:
+                stats = scanner.get_statistics()
 
-            self.tree.insert(
-                "",
-                tk.END,
-                values=(
-                    info['id'],
-                    info['pid'],
-                    f"{info.get('cpu_percent', 'N/A')}%",
-                    memory_display,
-                    info.get('scan_rate', 'N/A'),
-                    info.get('wallets_scanned', 'N/A'),
-                    info.get('wallets_with_balance', 'N/A'),
-                    info['status'],
-                    "Stop"  # Clickable stop button
+                # Calculate total scan rate
+                cpu_rate = float(stats.get('cpu_scan_rate', 0))
+                gpu_rate = float(stats.get('gpu_scan_rate', 0))
+                total_rate = f"{cpu_rate + gpu_rate:.1f}/min"
+
+                self.tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        process_id,
+                        f"{stats.get('cpu_usage', 'N/A')}%",
+                        f"{stats.get('memory_usage', 'N/A')}%",
+                        total_rate,
+                        stats.get('total_scanned', 'N/A'),
+                        stats.get('wallets_with_balance', 'N/A'),
+                        "Running" if scanner.scanning else "Stopped",
+                        "Stop"
+                    )
                 )
-            )
+            except Exception as e:
+                logging.error(f"Error updating process {process_id}: {str(e)}")
 
         # Schedule next update
-        self.after(1000, self.update_instance_list)
+        self.after(1000, self.update_process_list)
