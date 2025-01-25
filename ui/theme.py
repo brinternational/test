@@ -34,14 +34,22 @@ def setup_theme(root):
 
     style.configure(
         "Title.TLabel",
-        font=("Segoe UI", 24, "bold"),
+        font=("Segoe UI", 10, "bold"),
         foreground=ACCENT,
         background=GREY_BG
     )
 
     style.configure(
         "Topic.TLabel",
-        font=("Segoe UI", 14, "bold"),
+        font=("Segoe UI", 10, "bold"),
+        foreground=TEXT,
+        background=GREY_BG
+    )
+
+    # Info label for instance details
+    style.configure(
+        "Info.TLabel",
+        font=("Segoe UI", 10),
         foreground=TEXT,
         background=GREY_BG
     )
@@ -51,7 +59,16 @@ def setup_theme(root):
         "TButton",
         background=ACCENT,
         foreground="#FFFFFF",
-        padding=(15, 8),
+        padding=(10, 5),
+        font=("Segoe UI", 10)
+    )
+
+    # Action button for instance control
+    style.configure(
+        "Action.TButton",
+        background=ACCENT,
+        foreground="#FFFFFF",
+        padding=(10, 5),
         font=("Segoe UI", 10, "bold")
     )
 
@@ -72,8 +89,8 @@ def setup_theme(root):
         "TNotebook.Tab",
         background=DARKER_GREY,
         foreground=TEXT,
-        padding=[20, 8],
-        font=("Segoe UI", 11)
+        padding=[15, 5],
+        font=("Segoe UI", 10)
     )
 
     style.map(
@@ -85,15 +102,30 @@ def setup_theme(root):
     # Configure text widget colors
     root.option_add("*Text.background", "#FFFFFF")
     root.option_add("*Text.foreground", TEXT)
-    root.option_add("*Text.font", ("Consolas", 11))
+    root.option_add("*Text.font", ("Consolas", 10))
 
     # Entry widget with better contrast
     style.configure(
         "TEntry",
         fieldbackground="#FFFFFF",
         foreground=TEXT,
-        padding=8,
-        font=("Segoe UI", 11)
+        padding=5,
+        font=("Segoe UI", 10)
+    )
+
+    # Treeview for instance list
+    style.configure(
+        "Treeview",
+        background="#FFFFFF",
+        fieldbackground="#FFFFFF",
+        foreground=TEXT,
+        font=("Segoe UI", 10)
+    )
+
+    style.configure(
+        "Treeview.Heading",
+        font=("Segoe UI", 10, "bold"),
+        padding=5
     )
 
     # Status message colors

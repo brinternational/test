@@ -4,7 +4,8 @@ import sys
 from ui.theme import setup_theme
 from ui.custom_widgets import EducationalFrame, WalletFrame, SHA256Frame, NodeSettingsFrame
 from version import get_version_info
-from bitcoin_utils import BitcoinUtils # Added import
+from bitcoin_utils import BitcoinUtils
+from instance_controller import InstanceManagerFrame  # Added import
 import logging
 import os
 
@@ -24,7 +25,7 @@ class BitcoinEducationApp(tk.Tk):
             super().__init__()
 
             # Create temp directory for wallets if it doesn't exist
-            temp_dir = os.path.join(os.path.expanduser("~"), "temp")
+            temp_dir = os.path.join("C:", "temp")  # Updated to use C:\temp
             os.makedirs(temp_dir, exist_ok=True)
             logging.info(f"Temp directory created/verified: {temp_dir}")
 
@@ -58,11 +59,14 @@ class BitcoinEducationApp(tk.Tk):
             self.notebook.pack(fill=tk.BOTH, expand=True)
 
             # Create and add frames
+            self.instance_manager_frame = InstanceManagerFrame(self.notebook)  # Added instance manager
             self.educational_frame = EducationalFrame(self.notebook)
             self.wallet_frame = WalletFrame(self.notebook)
             self.sha256_frame = SHA256Frame(self.notebook)
             self.node_settings_frame = NodeSettingsFrame(self.notebook)
 
+            # Add tabs in preferred order
+            self.notebook.add(self.instance_manager_frame, text="Instances")  # Added first
             self.notebook.add(self.educational_frame, text="Learn")
             self.notebook.add(self.wallet_frame, text="Wallet")
             self.notebook.add(self.sha256_frame, text="SHA256")
@@ -70,6 +74,9 @@ class BitcoinEducationApp(tk.Tk):
 
             # Test node connection and update status
             self.check_node_connection()
+
+            # Bind cleanup to window closing
+            self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         except Exception as e:
             logging.error(f"Error during initialization: {str(e)}")
@@ -85,7 +92,18 @@ class BitcoinEducationApp(tk.Tk):
                 "Not connected to Bitcoin node. Please configure node settings before scanning."
             )
             # Switch to node settings tab
-            self.notebook.select(3)  # Index of node_settings_frame
+            self.notebook.select(4)  # Updated index for node_settings_frame
+
+    def on_closing(self):
+        """Clean up resources before closing the application."""
+        try:
+            # Stop all running instances
+            self.instance_manager_frame.controller.stop_all_instances()
+            logging.info("Successfully stopped all instances")
+        except Exception as e:
+            logging.error(f"Error stopping instances: {str(e)}")
+        finally:
+            self.destroy()
 
     def show_about(self):
         version_info = get_version_info()
