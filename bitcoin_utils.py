@@ -11,11 +11,11 @@ class BitcoinUtils:
     # Config file location
     CONFIG_FILE = r"C:\temp\node_settings.txt"
 
-    # Default node settings
+    # Default node settings (will be overridden by config file)
     NODE_URL = 'localhost'
     NODE_PORT = '8332'
-    RPC_USER = 'your_rpc_username'
-    RPC_PASS = 'your_rpc_password'
+    RPC_USER = None
+    RPC_PASS = None
     _rpc_connection = None
 
     @classmethod
@@ -78,6 +78,79 @@ class BitcoinUtils:
         }
 
     @classmethod
+    def load_config(cls):
+        """Load configuration from file."""
+        try:
+            if os.path.exists(cls.CONFIG_FILE):
+                with open(cls.CONFIG_FILE, 'r') as f:
+                    settings = {}
+                    for line in f:
+                        if line.startswith('#') or '=' not in line:
+                            continue
+                        key, value = line.strip().split('=', 1)
+                        settings[key] = value
+
+                    # Update class attributes with loaded settings
+                    cls.NODE_URL = settings.get('url', cls.NODE_URL)
+                    cls.NODE_PORT = settings.get('port', cls.NODE_PORT)
+                    cls.RPC_USER = settings.get('username')
+                    cls.RPC_PASS = settings.get('password')
+
+                    return True
+        except Exception as e:
+            print(f"Error loading config: {str(e)}")
+        return False
+
+    @classmethod
+    def save_config(cls, url: str, port: str, username: str, password: str, wallet_dir: str):
+        """Save configuration to file."""
+        try:
+            config_content = f"""url={url}
+port={port}
+username={username}
+password={password}
+last_updated={datetime.now().strftime('%Y-%m-%d')}
+"""
+            os.makedirs(os.path.dirname(cls.CONFIG_FILE), exist_ok=True)
+            with open(cls.CONFIG_FILE, 'w') as f:
+                f.write(config_content)
+
+            # Create wallet directory and log timestamp
+            if wallet_dir:
+                os.makedirs(wallet_dir, exist_ok=True)
+                timestamp_file = os.path.join(wallet_dir, "wallets.txt")
+                with open(timestamp_file, 'a') as f:
+                    f.write(f"\nScanner started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+            return True
+        except Exception as e:
+            print(f"Error saving config: {str(e)}")
+            return False
+
+    @classmethod
+    def configure_node(cls, node_url: str, port: str, rpc_user: str, rpc_pass: str):
+        """Configure Bitcoin node connection settings."""
+        cls.NODE_URL = node_url
+        cls.NODE_PORT = port
+        cls.RPC_USER = rpc_user
+        cls.RPC_PASS = rpc_pass
+        cls._rpc_connection = None  # Reset connection to use new settings
+
+    @classmethod
+    def get_rpc_connection(cls) -> AuthServiceProxy:
+        """Get or create RPC connection to Bitcoin node."""
+        if cls._rpc_connection is None:
+            cls.load_config()  # Load config if not already loaded
+
+            if not all([cls.RPC_USER, cls.RPC_PASS]):
+                raise ValueError("Bitcoin node credentials not configured. Please check settings file.")
+
+            rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
+            cls._rpc_connection = AuthServiceProxy(rpc_url)
+
+        return cls._rpc_connection
+
+    @classmethod
     def test_node_connection(cls) -> Tuple[bool, str]:
         """Test connection to Bitcoin node."""
         try:
@@ -105,82 +178,8 @@ class BitcoinUtils:
             return False, f"Error: {message}"
 
     @classmethod
-    def save_config(cls, url: str, port: str, username: str, password: str, wallet_dir: str):
-        """Save configuration to file."""
-        try:
-            config_content = f"""# Bitcoin Node Configuration
-# Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-url={url}
-port={port}
-username={username}
-password={password}
-wallet_dir={wallet_dir}
-"""
-            os.makedirs(os.path.dirname(cls.CONFIG_FILE), exist_ok=True)
-            with open(cls.CONFIG_FILE, 'w') as f:
-                f.write(config_content)
-
-            # Create wallet directory with timestamp
-            os.makedirs(wallet_dir, exist_ok=True)
-            timestamp_file = os.path.join(wallet_dir, "wallets.txt")
-            with open(timestamp_file, 'a') as f:
-                f.write(f"\nScanner started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-            return True
-        except Exception as e:
-            print(f"Error saving config: {str(e)}")
-            return False
-
-    @classmethod
-    def load_config(cls):
-        """Load configuration from file."""
-        try:
-            if os.path.exists(cls.CONFIG_FILE):
-                with open(cls.CONFIG_FILE, 'r') as f:
-                    settings = {}
-                    for line in f:
-                        if line.startswith('#') or '=' not in line:
-                            continue
-                        key, value = line.strip().split('=', 1)
-                        settings[key] = value
-
-                    # Update class attributes with loaded settings
-                    cls.NODE_URL = settings.get('url', cls.NODE_URL)
-                    cls.NODE_PORT = settings.get('port', cls.NODE_PORT)
-                    cls.RPC_USER = settings.get('username', cls.RPC_USER)
-                    cls.RPC_PASS = settings.get('password', cls.RPC_PASS)
-
-                    return True
-        except Exception as e:
-            print(f"Error loading config: {str(e)}")
-        return False
-
-    @classmethod
-    def configure_node(cls, node_url: str, port: str, rpc_user: str, rpc_pass: str):
-        """Configure Bitcoin node connection settings."""
-        cls.NODE_URL = node_url
-        cls.NODE_PORT = port
-        cls.RPC_USER = rpc_user
-        cls.RPC_PASS = rpc_pass
-        cls._rpc_connection = None  # Reset connection to use new settings
-
-    @classmethod
-    def get_rpc_connection(cls) -> AuthServiceProxy:
-        """Get or create RPC connection to Bitcoin node."""
-        if cls._rpc_connection is None:
-            cls.load_config()
-
-            if not all([cls.RPC_USER, cls.RPC_PASS]):
-                raise ValueError("Bitcoin node credentials not configured.")
-
-            rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
-            cls._rpc_connection = AuthServiceProxy(rpc_url)
-
-        return cls._rpc_connection
-
-    @classmethod
     def check_balance(cls, address: str) -> Optional[float]:
-        """Check balance of a Bitcoin address."""
+        """Check balance of a Bitcoin address using the node."""
         try:
             rpc = cls.get_rpc_connection()
             balance = rpc.getreceivedbyaddress(address)
@@ -191,7 +190,7 @@ wallet_dir={wallet_dir}
 
     @classmethod
     def validate_address(cls, address: str) -> bool:
-        """Validate Bitcoin address format."""
+        """Validate Bitcoin address format using the node."""
         try:
             rpc = cls.get_rpc_connection()
             result = rpc.validateaddress(address)
