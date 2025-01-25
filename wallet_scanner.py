@@ -13,6 +13,7 @@ import hashlib
 from gpu_hasher import GPUHasher
 import uuid
 from wallet_generator import WalletGenerator
+from bitcoin_utils import BitcoinUtils
 
 class WalletScanner:
     _instance_counter = multiprocessing.Value('i', 0)
@@ -31,29 +32,18 @@ class WalletScanner:
         self._futures = []
         self._lock = threading.Lock()
 
-        self.cpu_enabled = True
-        self.gpu_enabled = True
-        self.npu_enabled = True
-
-        self.CPU_BATCH_SIZE = max(1000 * (self.cpu_thread_count // 2), 2500)
-        self.GPU_BATCH_SIZE = 5000
-
         self.save_dir = os.path.normpath("C:/temp")
         self._setup_save_directory()
 
+        # Initialize Bitcoin node connection
         try:
-            self.gpu_hasher = GPUHasher(
-                enable_cpu=self.cpu_enabled,
-                enable_gpu=self.gpu_enabled,
-                enable_npu=self.npu_enabled,
-                gpu_threads=self.gpu_thread_count
-            )
-            logging.info(f"Instance {self.instance_id}: GPU acceleration enabled: {self.gpu_hasher.get_device_info()}")
+            BitcoinUtils.verify_live_node()
+            logging.info(f"Instance {self.instance_id}: Connected to Bitcoin node")
         except Exception as e:
-            logging.warning(f"Instance {self.instance_id}: GPU acceleration disabled: {str(e)}")
-            self.gpu_hasher = None
+            logging.error(f"Instance {self.instance_id}: Failed to connect to Bitcoin node: {str(e)}")
+            raise
 
-        self.wallet_queue = Queue(maxsize=self.CPU_BATCH_SIZE * 2)
+        self.wallet_queue = Queue(maxsize=1000)  # Reduced queue size for more frequent node checks
         self.result_queue = multiprocessing.Queue()
 
         self.shared_total = multiprocessing.Value('i', 0)
@@ -63,9 +53,12 @@ class WalletScanner:
 
         self.cpu_scan_rates = deque(maxlen=10)
         self.gpu_scan_rates = deque(maxlen=10)
-        self.scan_rates = deque(maxlen=10)
         self.last_cpu_time = None
         self.last_gpu_time = None
+
+    def verify_wallet(self, address: str) -> float:
+        """Verify wallet against live node."""
+        return BitcoinUtils.verify_wallet(address)
 
     def _setup_save_directory(self):
         try:
@@ -83,10 +76,11 @@ class WalletScanner:
             filepath = self._get_wallet_filename()
             with open(filepath, 'a') as f:
                 f.write(
-                    f"\n=== Wallet Found at {wallet_info['found_at']} ===\n"
-                    f"Seed Phrase: {wallet_info['seed_phrase']}\n"
+                    f"\n=== Verified Wallet Found at {wallet_info['found_at']} ===\n"
                     f"Address: {wallet_info['address']}\n"
                     f"Balance: {wallet_info['balance']} BTC\n"
+                    f"Network: {wallet_info['network']}\n"
+                    f"Block Height: {wallet_info['block_height']}\n"
                     f"{'=' * 50}\n"
                 )
         except Exception as e:
@@ -208,11 +202,35 @@ class WalletScanner:
             return []
 
     def _process_batch(self, batch: List[Dict]) -> List[Dict]:
-        if self.gpu_hasher and self.gpu_enabled:
-            if len(batch) < self.GPU_BATCH_SIZE:
-                return []
-            return self._process_batch_gpu(batch)
-        return self._process_batch_cpu(batch[:self.CPU_BATCH_SIZE])
+        """Process a batch of addresses with live node verification."""
+        try:
+            # Verify node connection before processing
+            BitcoinUtils.verify_live_node()
+            node_info = BitcoinUtils.get_node_info()
+
+            results = []
+            for wallet_data in batch:
+                try:
+                    # Verify each address with the live node
+                    balance = self.verify_wallet(wallet_data['address'])
+                    if balance > 0:
+                        wallet_data.update({
+                            'balance': balance,
+                            'network': node_info['chain'],
+                            'block_height': node_info['blocks'],
+                            'found_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                        results.append(wallet_data)
+                        logging.info(f"Instance {self.instance_id}: Found wallet with balance: {balance} BTC")
+                except Exception as e:
+                    logging.error(f"Instance {self.instance_id}: Error verifying wallet: {str(e)}")
+                    continue
+
+            return results
+        except Exception as e:
+            logging.error(f"Instance {self.instance_id}: Batch processing failed - no live node connection: {str(e)}")
+            self.stop_scan()  # Stop scanning if we lose node connection
+            raise
 
     def _wallet_generator_worker(self):
         logging.info(f"Instance {self.instance_id}: Generator worker started")
@@ -384,22 +402,32 @@ class WalletScanner:
 
     def get_statistics(self):
         with self._lock:
-            cpu_rate = sum(self.cpu_scan_rates) / len(self.cpu_scan_rates) if self.cpu_scan_rates else 0
-            cpu_rate_per_min = cpu_rate * 60 if cpu_rate > 0 else 0
+            try:
+                # Verify live node connection
+                BitcoinUtils.verify_live_node()
+                node_info = BitcoinUtils.get_node_info()
 
-            gpu_rate = sum(self.gpu_scan_rates) / len(self.gpu_scan_rates) if self.gpu_scan_rates else 0
-            gpu_rate_per_min = gpu_rate * 60 if gpu_rate > 0 else 0
+                cpu_rate = sum(self.cpu_scan_rates) / len(self.cpu_scan_rates) if self.cpu_scan_rates else 0
+                cpu_rate_per_min = cpu_rate * 60 if cpu_rate > 0 else 0
 
-            return {
-                'total_scanned': f"{self.shared_total.value:,}",
-                'cpu_processed': f"{self.cpu_processed.value:,}",
-                'gpu_processed': f"{self.gpu_processed.value:,}",
-                'wallets_with_balance': f"{self.shared_balance_count.value:,}",
-                'cpu_scan_rate': f"{cpu_rate_per_min:,.1f}",
-                'gpu_scan_rate': f"{gpu_rate_per_min:,.1f}",
-                'active_threads': len([f for f in self._futures[1:] if not f.done()]),
-                'queue_size': f"{self.wallet_queue.qsize() * self.GPU_BATCH_SIZE:,}"
-            }
+                gpu_rate = sum(self.gpu_scan_rates) / len(self.gpu_scan_rates) if self.gpu_scan_rates else 0
+                gpu_rate_per_min = gpu_rate * 60 if gpu_rate > 0 else 0
+
+                return {
+                    'total_scanned': f"{self.shared_total.value:,}",
+                    'cpu_processed': f"{self.cpu_processed.value:,}",
+                    'gpu_processed': f"{self.gpu_processed.value:,}",
+                    'wallets_with_balance': f"{self.shared_balance_count.value:,}",
+                    'cpu_scan_rate': f"{cpu_rate_per_min:,.1f}",
+                    'gpu_scan_rate': f"{gpu_rate_per_min:,.1f}",
+                    'queue_size': f"{self.wallet_queue.qsize():,}",
+                    'node_chain': node_info['chain'],
+                    'node_height': node_info['blocks']
+                }
+            except Exception as e:
+                logging.error(f"Instance {self.instance_id}: Failed to get statistics - no live node connection: {str(e)}")
+                self.stop_scan()  # Stop scanning if we lose node connection
+                raise
 
     def set_thread_count(self, count: int):
         if count < 1:

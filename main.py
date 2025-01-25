@@ -145,18 +145,30 @@ class NodeSettingsFrame(ttk.Frame):
             messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
 
     def check_connection(self):
+        """Test connection to Bitcoin node."""
         try:
-            success, info = self.bitcoin_utils.test_node_connection()
+            self.bitcoin_utils.verify_live_node()
+            node_info = self.bitcoin_utils.get_node_info()
+
             self.status_indicator.config(foreground="green")
             self.status_label.config(text="Connected", foreground="green")
+
+            status_text = (
+                f"Connected to Bitcoin Node\n"
+                f"Network: {node_info['chain']}\n"
+                f"Block Height: {node_info['blocks']:,}\n"
+                f"Connected Peers: {node_info['peers']}"
+            )
+
             self.info_text.delete(1.0, tk.END)
-            self.info_text.insert(tk.END, info)
+            self.info_text.insert(tk.END, status_text)
 
         except Exception as e:
             self.status_indicator.config(foreground="red")
             self.status_label.config(text="Error", foreground="red")
             self.info_text.delete(1.0, tk.END)
-            self.info_text.insert(tk.END, f"Error: {str(e)}")
+            self.info_text.insert(tk.END, f"Node Error: {str(e)}")
+            raise ConnectionError(f"Bitcoin node connection failed: {str(e)}")
 
 class SummaryTab(ttk.Frame):
     def __init__(self, parent):
@@ -382,15 +394,15 @@ class BitcoinEducationApp(tk.Tk):
             while True:
                 try:
                     bitcoin_utils = BitcoinUtils()
-                    if bitcoin_utils.get_node_info():
-                        self.connection_indicator.config(foreground="green")
-                        self.connection_text.config(text="Connected to node")
-                    else:
-                        self.connection_indicator.config(foreground="red")
-                        self.connection_text.config(text="Simulation mode")
-                except Exception:
+                    bitcoin_utils.verify_live_node()
+                    node_info = bitcoin_utils.get_node_info()
+
+                    self.connection_indicator.config(foreground="green")
+                    self.connection_text.config(text=f"Connected to node - Chain: {node_info['chain']}")
+                except Exception as e:
                     self.connection_indicator.config(foreground="red")
-                    self.connection_text.config(text="Simulation mode")
+                    self.connection_text.config(text=f"Node Error: {str(e)}")
+                    logging.error(f"Node connection error: {str(e)}")
                 finally:
                     threading.Event().wait(5.0)  # Check every 5 seconds
 

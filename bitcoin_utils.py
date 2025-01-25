@@ -6,6 +6,9 @@ from datetime import datetime, timedelta
 import random
 import base58
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class BitcoinUtils:
     # Config file location
@@ -88,7 +91,7 @@ class BitcoinUtils:
                         if line.startswith('#') or '=' not in line:
                             continue
                         key, value = line.strip().split('=', 1)
-                        settings[key] = value
+                        settings[key.strip()] = value.strip()
 
                     # Update class attributes with loaded settings
                     cls.NODE_URL = settings.get('url', cls.NODE_URL)
@@ -96,10 +99,16 @@ class BitcoinUtils:
                     cls.RPC_USER = settings.get('username')
                     cls.RPC_PASS = settings.get('password')
 
+                    logging.info(f"Loaded node settings from {cls.CONFIG_FILE}")
+                    logging.info(f"Node URL: {cls.NODE_URL}:{cls.NODE_PORT}")
+
                     return True
+            else:
+                logging.error(f"Config file not found at {cls.CONFIG_FILE}")
+                return False
         except Exception as e:
-            print(f"Error loading config: {str(e)}")
-        return False
+            logging.error(f"Error loading config: {str(e)}")
+            return False
 
     @classmethod
     def save_config(cls, url: str, port: str, username: str, password: str, wallet_dir: str):
@@ -191,3 +200,44 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
         rpc = cls.get_rpc_connection()
         result = rpc.validateaddress(address)
         return result.get('isvalid', False)
+
+    @classmethod
+    def verify_live_node(cls) -> None:
+        """Verify connection to live node or raise error."""
+        try:
+            rpc = cls.get_rpc_connection()
+            blockchain_info = rpc.getblockchaininfo()
+
+            if not blockchain_info:
+                raise ConnectionError("Could not fetch blockchain info from node")
+
+        except Exception as e:
+            raise ConnectionError(f"Live node verification failed: {str(e)}")
+
+    @classmethod
+    def verify_wallet(cls, address: str) -> float:
+        """Verify wallet against live node and return balance."""
+        cls.verify_live_node()  # Ensure we're connected to live node
+
+        if not cls.validate_address(address):
+            raise ValueError(f"Invalid Bitcoin address format: {address}")
+
+        balance = cls.check_balance(address)
+        if balance is None:
+            raise ConnectionError(f"Failed to verify wallet {address} against live node")
+
+        return balance
+
+    @classmethod
+    def get_node_info(cls) -> Dict:
+        """Get current node information."""
+        cls.verify_live_node()  # Will raise error if node isn't accessible
+
+        rpc = cls.get_rpc_connection()
+        blockchain_info = rpc.getblockchaininfo()
+
+        return {
+            'chain': blockchain_info.get('chain', 'unknown'),
+            'blocks': blockchain_info.get('blocks', 0),
+            'peers': rpc.getconnectioncount()
+        }
