@@ -11,6 +11,8 @@ import os
 import threading
 import time
 from typing import Optional
+from flask import Flask
+from threading import Thread
 
 # Configure logging
 logging.basicConfig(
@@ -22,14 +24,25 @@ logging.basicConfig(
     ]
 )
 
+# Initialize Flask app
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bitcoin Education App API"
+
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=5000)
+
 class ConnectionManager:
     def __init__(self, app):
         self.app = app
         self.connected = False
         self.last_check = 0
-        self.check_interval = 30  # seconds
+        self.check_interval = 15  # Reduced interval for more responsive checks
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._initial_check_done = False
 
     def start(self):
         if not self._thread or not self._thread.is_alive():
@@ -49,9 +62,10 @@ class ConnectionManager:
 
     def check_connection(self) -> bool:
         success, message = BitcoinUtils.test_node_connection()
-        if success != self.connected:
+        if success != self.connected or not self._initial_check_done:
             self.connected = success
-            self.app.update_connection_status(success, message)
+            self._initial_check_done = True
+            self.app.update_connection_status(success, message, show_warning=True)
         return success
 
 class BitcoinEducationApp(tk.Tk):
@@ -96,12 +110,23 @@ class BitcoinEducationApp(tk.Tk):
             )
             title.pack(side=tk.LEFT)
 
+            # Connection status with icon
+            self.connection_frame = ttk.Frame(self.header_frame)
+            self.connection_frame.pack(side=tk.RIGHT)
+
+            self.connection_icon = ttk.Label(
+                self.connection_frame,
+                text="○",  # Default icon
+                foreground="#666666"
+            )
+            self.connection_icon.pack(side=tk.LEFT, padx=(0, 5))
+
             self.connection_status = ttk.Label(
-                self.header_frame,
+                self.connection_frame,
                 text="Checking node connection...",
                 style="Info.TLabel"
             )
-            self.connection_status.pack(side=tk.RIGHT)
+            self.connection_status.pack(side=tk.LEFT)
 
             # Setup notebook with tabs
             self.notebook = ttk.Notebook(self.container)
@@ -123,30 +148,46 @@ class BitcoinEducationApp(tk.Tk):
             # Bind cleanup to window closing
             self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+            # Initial connection check
+            self.after(1000, self.connection_manager.check_connection)
+
         except Exception as e:
             logging.error(f"Error during initialization: {str(e)}")
             messagebox.showerror("Error", f"Failed to start: {str(e)}")
             raise
 
-    def update_connection_status(self, connected: bool, message: str):
+    def update_connection_status(self, connected: bool, message: str, show_warning: bool = False):
         """Update the connection status display."""
         if connected:
             self.connection_status.configure(
-                text="✓ Connected to node",
+                text="Connected to node",
                 foreground="#388E3C"  # Success green
+            )
+            self.connection_icon.configure(
+                text="●",  # Filled circle for connected
+                foreground="#388E3C"
             )
         else:
             self.connection_status.configure(
-                text="✗ Node connection failed",
+                text="Node connection failed",
                 foreground="#D32F2F"  # Error red
             )
-            # Show warning only if we're not on the node settings tab
-            if self.notebook.select() != str(self.node_settings_frame):
-                messagebox.showwarning(
-                    "Node Connection",
-                    "Not connected to Bitcoin node. Please configure node settings."
-                )
+            self.connection_icon.configure(
+                text="○",  # Empty circle for disconnected
+                foreground="#D32F2F"
+            )
+            # Show warning only if requested and we're not on the node settings tab
+            if show_warning and self.notebook.select() != str(self.node_settings_frame):
+                self.show_connection_warning(message)
                 self.notebook.select(2)  # Switch to node settings tab
+
+    def show_connection_warning(self, message: str):
+        """Display a warning about node connection issues."""
+        messagebox.showwarning(
+            "Node Connection Required",
+            f"Bitcoin node connection failed:\n\n{message}\n\n"
+            "Please configure your node settings to continue."
+        )
 
     def on_closing(self):
         """Clean up resources before closing."""
@@ -171,6 +212,11 @@ class BitcoinEducationApp(tk.Tk):
 
 if __name__ == "__main__":
     try:
+        # Start Flask server in a separate thread
+        flask_thread = Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+
+        # Start Tkinter application
         app = BitcoinEducationApp()
         app.mainloop()
     except Exception as e:

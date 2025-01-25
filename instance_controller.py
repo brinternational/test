@@ -227,7 +227,7 @@ class InstanceManagerFrame(ttk.Frame):
             # Handle the memory_percent formatting
             memory_percent = info.get('memory_percent', 'N/A')
             if isinstance(memory_percent, (int, float)):
-                memory_display = f"{memory_percent:.1f}%"
+                memory_display = f"{float(memory_percent):.1f}%"
             else:
                 memory_display = "N/A"
 

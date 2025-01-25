@@ -168,13 +168,13 @@ class WalletFrame(ttk.Frame):
         self.setup_ui()
 
     def setup_ui(self):
-        # Configure grid layout for full width
+        # Configure grid layout for full width and height
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)  # Make content area expandable
+        self.grid_rowconfigure(2, weight=1)  # Make content area expandable
 
         # Header section
         header_frame = ttk.Frame(self)
-        header_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
         header_frame.grid_columnconfigure(1, weight=1)
 
         # Title and instance info
@@ -203,20 +203,23 @@ class WalletFrame(ttk.Frame):
         controls_frame = ttk.Frame(details_frame)
         controls_frame.pack(side=tk.RIGHT)
 
-        # Thread control
-        ttk.Label(controls_frame, text="Threads:").pack(side=tk.LEFT, padx=2)
+        # Thread control with label
+        thread_frame = ttk.Frame(controls_frame)
+        thread_frame.pack(side=tk.LEFT, padx=5)
+        ttk.Label(thread_frame, text="CPU Threads:").pack(side=tk.LEFT, padx=2)
         self.thread_spinbox = ttk.Spinbox(
-            controls_frame,
+            thread_frame,
             from_=1,
             to=16,
-            width=3
+            width=3,
+            command=self.update_thread_count
         )
         self.thread_spinbox.set(4)
         self.thread_spinbox.pack(side=tk.LEFT, padx=2)
 
         # Hardware acceleration options
-        accel_frame = ttk.Frame(controls_frame)
-        accel_frame.pack(side=tk.LEFT, padx=5)
+        accel_frame = ttk.LabelFrame(controls_frame, text="Acceleration")
+        accel_frame.pack(side=tk.LEFT, padx=10)
 
         self.cpu_var = tk.BooleanVar(value=True)
         self.gpu_var = tk.BooleanVar(value=False)
@@ -228,19 +231,14 @@ class WalletFrame(ttk.Frame):
                 text=text,
                 variable=var,
                 command=self.update_acceleration
-            ).pack(side=tk.LEFT, padx=2)
-
-        # Main content area (using grid for better space utilization)
-        content_frame = ttk.Frame(self)
-        content_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        content_frame.grid_columnconfigure(0, weight=1)
-        content_frame.grid_rowconfigure(1, weight=1)
+            ).pack(side=tk.LEFT, padx=5)
 
         # Control bar
-        control_bar = ttk.Frame(content_frame)
-        control_bar.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        control_bar = ttk.Frame(self)
+        control_bar.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+        control_bar.grid_columnconfigure(1, weight=1)
 
-        # Scan button
+        # Left side - Scan button
         self.scan_button = ttk.Button(
             control_bar,
             text="▶ Start Scanning",
@@ -248,80 +246,87 @@ class WalletFrame(ttk.Frame):
             style='Action.TButton',
             width=15
         )
-        self.scan_button.pack(side=tk.LEFT)
+        self.scan_button.grid(row=0, column=0, padx=(0, 10))
 
-        # Status and rate display
+        # Center - Progress bar
+        self.progress_var = tk.DoubleVar()
+        self.progress = ttk.Progressbar(
+            control_bar,
+            variable=self.progress_var,
+            mode='determinate'
+        )
+        self.progress.grid(row=0, column=1, sticky="ew")
+
+        # Right side - Processing rate
         self.rate_label = ttk.Label(
             control_bar,
             text="Rate: Waiting to start...",
             style='Info.TLabel'
         )
-        self.rate_label.pack(side=tk.RIGHT)
+        self.rate_label.grid(row=0, column=2, padx=(10, 0))
 
-        # Statistics panel (2-column grid)
+        # Main content area - Split into statistics and results
+        content_frame = ttk.Frame(self)
+        content_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+        content_frame.grid_columnconfigure(0, weight=3)
+        content_frame.grid_columnconfigure(1, weight=2)
+        content_frame.grid_rowconfigure(0, weight=1)
+
+        # Left side - Statistics panel
         stats_frame = ttk.LabelFrame(content_frame, text="Scanning Statistics")
-        stats_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+        stats_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         stats_frame.grid_columnconfigure(1, weight=1)
-
-        # Progress bar
-        ttk.Label(stats_frame, text="Progress:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-        self.progress_var = tk.DoubleVar()
-        self.progress = ttk.Progressbar(
-            stats_frame,
-            variable=self.progress_var,
-            mode='determinate'
-        )
-        self.progress.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
 
         # Statistics grid
         stats_grid = ttk.Frame(stats_frame)
-        stats_grid.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        stats_grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         stats_grid.grid_columnconfigure(1, weight=1)
+        stats_grid.grid_columnconfigure(3, weight=1)
 
-        # Statistics labels
+        # Statistics labels in a 4x4 grid
         self.stats_labels = {}
         stats = [
             ("Total Scanned", "total_scanned"),
-            ("Scan Rate", "scan_rate"),
+            ("CPU Scan Rate", "cpu_scan_rate"),
+            ("GPU Scan Rate", "gpu_scan_rate"),
             ("Found with Balance", "wallets_with_balance"),
             ("Active Threads", "active_threads"),
             ("Queue Size", "queue_size"),
             ("CPU Usage", "cpu_usage"),
             ("Memory Usage", "memory_usage"),
-            ("Network Status", "network_status")
+            ("Network Status", "network_status"),
+            ("Current Block", "current_block"),
+            ("Node Latency", "node_latency"),
+            ("Cache Hit Rate", "cache_hit_rate")
         ]
 
         for i, (label, key) in enumerate(stats):
             row = i // 2
-            col = i % 2
-            frame = ttk.Frame(stats_grid)
-            frame.grid(row=row, column=col, sticky="ew", padx=5, pady=2)
-            frame.grid_columnconfigure(1, weight=1)
+            col = (i % 2) * 2
+            ttk.Label(stats_grid, text=f"{label}:").grid(row=row, column=col, sticky="e", padx=5, pady=2)
+            self.stats_labels[key] = ttk.Label(stats_grid, text="--")
+            self.stats_labels[key].grid(row=row, column=col + 1, sticky="w", padx=5, pady=2)
 
-            ttk.Label(frame, text=f"{label}:").grid(row=0, column=0, sticky="e", padx=5)
-            self.stats_labels[key] = ttk.Label(frame, text="--")
-            self.stats_labels[key].grid(row=0, column=1, sticky="w", padx=5)
-
-        # Results area
+        # Right side - Results area
         results_frame = ttk.LabelFrame(content_frame, text="Scan Results")
-        results_frame.grid(row=2, column=0, sticky="nsew", pady=5)
+        results_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         results_frame.grid_columnconfigure(0, weight=1)
+        results_frame.grid_rowconfigure(0, weight=1)
 
+        # Results text area with scrollbar
         self.results_text = tk.Text(
             results_frame,
-            height=8,
             wrap=tk.WORD,
             font=("Consolas", 10)
         )
-        self.results_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.results_text.grid(row=0, column=0, sticky="nsew", padx=(5, 0), pady=5)
 
-        # Scrollbar for results
         results_scroll = ttk.Scrollbar(
             results_frame,
             orient="vertical",
             command=self.results_text.yview
         )
-        results_scroll.grid(row=0, column=1, sticky="ns")
+        results_scroll.grid(row=0, column=1, sticky="ns", padx=(0, 5), pady=5)
         self.results_text.configure(yscrollcommand=results_scroll.set)
 
         # Start periodic updates
@@ -370,10 +375,16 @@ class WalletFrame(ttk.Frame):
             stats = self.wallet_scanner.get_statistics()
 
             try:
-                # Remove commas before converting to float
-                cpu_rate = float(stats['cpu_scan_rate'].replace(',', ''))
-                gpu_rate = float(stats['gpu_scan_rate'].replace(',', ''))
+                # Handle rate calculations with proper string cleaning
+                def clean_number(value):
+                    if isinstance(value, str):
+                        return float(value.replace(',', ''))
+                    return float(value)
+
+                cpu_rate = clean_number(stats.get('cpu_scan_rate', 0))
+                gpu_rate = clean_number(stats.get('gpu_scan_rate', 0))
                 total_rate = cpu_rate + gpu_rate
+
                 self.rate_label.config(
                     text=f"Processing Rate: {total_rate:,.1f} wallets/min "
                          f"(CPU: {cpu_rate:,.1f}/min, GPU: {gpu_rate:,.1f}/min)"
@@ -384,10 +395,14 @@ class WalletFrame(ttk.Frame):
             for key, label in self.stats_labels.items():
                 try:
                     value = stats[key]
-                    # Format numbers with commas for display
                     if isinstance(value, (int, float)):
-                        value = f"{value:,}"
-                    label.config(text=str(value))
+                        if key in ['cpu_usage', 'memory_usage']:
+                            formatted_value = f"{float(value):.1f}%"
+                        else:
+                            formatted_value = f"{value:,}"
+                    else:
+                        formatted_value = str(value)
+                    label.config(text=formatted_value)
                 except (KeyError, ValueError):
                     label.config(text="--")
 
