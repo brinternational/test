@@ -168,44 +168,28 @@ class WalletFrame(ttk.Frame):
         self.setup_ui()
 
     def setup_ui(self):
-        # Configure grid layout
+        # Configure grid layout for full width
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)  # Make content area expandable
 
-        # Create main scrollable frame
-        canvas = tk.Canvas(self)
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        # Header section
+        header_frame = ttk.Frame(self)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        header_frame.grid_columnconfigure(1, weight=1)
 
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=canvas.winfo_reqwidth())
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        # Grid layout for canvas and scrollbar
-        canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.grid_rowconfigure(0, weight=1)
-
-        # Header frame with title and instance info
-        header_frame = ttk.Frame(scrollable_frame)
-        header_frame.pack(fill=tk.X, padx=5, pady=2)
-
-        title = ttk.Label(
+        # Title and instance info
+        ttk.Label(
             header_frame,
             text=f"Bitcoin Wallet Scanner (Instance: {self.instance_info['instance_id']})",
             style="Title.TLabel"
-        )
-        title.pack(side=tk.LEFT)
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
 
-        # Compact instance info and controls frame
-        info_controls_frame = ttk.Frame(scrollable_frame)
-        info_controls_frame.pack(fill=tk.X, padx=5, pady=2)
+        # Instance details in a compact format
+        details_frame = ttk.Frame(header_frame)
+        details_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
 
         # Left side: Instance info
-        info_frame = ttk.Frame(info_controls_frame)
+        info_frame = ttk.Frame(details_frame)
         info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.instance_info_label = ttk.Label(
@@ -213,11 +197,11 @@ class WalletFrame(ttk.Frame):
             text=self._get_instance_info_text(),
             style='Info.TLabel'
         )
-        self.instance_info_label.pack(side=tk.LEFT, padx=2)
+        self.instance_info_label.pack(side=tk.LEFT)
 
         # Right side: Controls
-        controls_frame = ttk.Frame(info_controls_frame)
-        controls_frame.pack(side=tk.RIGHT, padx=2)
+        controls_frame = ttk.Frame(details_frame)
+        controls_frame.pack(side=tk.RIGHT)
 
         # Thread control
         ttk.Label(controls_frame, text="Threads:").pack(side=tk.LEFT, padx=2)
@@ -225,8 +209,7 @@ class WalletFrame(ttk.Frame):
             controls_frame,
             from_=1,
             to=16,
-            width=3,
-            command=self.update_thread_count
+            width=3
         )
         self.thread_spinbox.set(4)
         self.thread_spinbox.pack(side=tk.LEFT, padx=2)
@@ -244,61 +227,105 @@ class WalletFrame(ttk.Frame):
                 accel_frame,
                 text=text,
                 variable=var,
-                command=self.update_acceleration,
-                style='Clickable.TCheckbutton'
+                command=self.update_acceleration
             ).pack(side=tk.LEFT, padx=2)
 
-        # Scan control and status frame
-        scan_status_frame = ttk.Frame(scrollable_frame)
-        scan_status_frame.pack(fill=tk.X, padx=5, pady=2)
+        # Main content area (using grid for better space utilization)
+        content_frame = ttk.Frame(self)
+        content_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        content_frame.grid_columnconfigure(0, weight=1)
+        content_frame.grid_rowconfigure(1, weight=1)
 
-        # Left side: Scan button
+        # Control bar
+        control_bar = ttk.Frame(content_frame)
+        control_bar.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+
+        # Scan button
         self.scan_button = ttk.Button(
-            scan_status_frame,
+            control_bar,
             text="▶ Start Scanning",
             command=self.toggle_scanning,
             style='Action.TButton',
-            cursor="hand2",
             width=15
         )
-        self.scan_button.pack(side=tk.LEFT, padx=2)
+        self.scan_button.pack(side=tk.LEFT)
 
-        # Right side: Rate display
+        # Status and rate display
         self.rate_label = ttk.Label(
-            scan_status_frame,
+            control_bar,
             text="Rate: Waiting to start...",
             style='Info.TLabel'
         )
-        self.rate_label.pack(side=tk.RIGHT, padx=2)
+        self.rate_label.pack(side=tk.RIGHT)
 
-        # Progress and stats in a single frame
-        progress_stats_frame = ttk.Frame(scrollable_frame)
-        progress_stats_frame.pack(fill=tk.X, padx=5, pady=2)
+        # Statistics panel (2-column grid)
+        stats_frame = ttk.LabelFrame(content_frame, text="Scanning Statistics")
+        stats_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+        stats_frame.grid_columnconfigure(1, weight=1)
 
         # Progress bar
+        ttk.Label(stats_frame, text="Progress:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(
-            progress_stats_frame,
+            stats_frame,
             variable=self.progress_var,
-            mode='indeterminate'
+            mode='determinate'
         )
-        self.progress.pack(fill=tk.X, pady=2)
+        self.progress.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
 
-        # Statistics label
-        self.stats_text = tk.StringVar(value="Click 'Start Scanning' to begin")
-        ttk.Label(
-            progress_stats_frame,
-            textvariable=self.stats_text,
-            wraplength=400
-        ).pack(fill=tk.X, pady=2)
+        # Statistics grid
+        stats_grid = ttk.Frame(stats_frame)
+        stats_grid.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        stats_grid.grid_columnconfigure(1, weight=1)
 
-        # Results area (more compact)
-        self.results_display = ttk.Label(
-            scrollable_frame,
-            text="Scanning results will appear here",
-            wraplength=400
+        # Statistics labels
+        self.stats_labels = {}
+        stats = [
+            ("Total Scanned", "total_scanned"),
+            ("Scan Rate", "scan_rate"),
+            ("Found with Balance", "wallets_with_balance"),
+            ("Active Threads", "active_threads"),
+            ("Queue Size", "queue_size"),
+            ("CPU Usage", "cpu_usage"),
+            ("Memory Usage", "memory_usage"),
+            ("Network Status", "network_status")
+        ]
+
+        for i, (label, key) in enumerate(stats):
+            row = i // 2
+            col = i % 2
+            frame = ttk.Frame(stats_grid)
+            frame.grid(row=row, column=col, sticky="ew", padx=5, pady=2)
+            frame.grid_columnconfigure(1, weight=1)
+
+            ttk.Label(frame, text=f"{label}:").grid(row=0, column=0, sticky="e", padx=5)
+            self.stats_labels[key] = ttk.Label(frame, text="--")
+            self.stats_labels[key].grid(row=0, column=1, sticky="w", padx=5)
+
+        # Results area
+        results_frame = ttk.LabelFrame(content_frame, text="Scan Results")
+        results_frame.grid(row=2, column=0, sticky="nsew", pady=5)
+        results_frame.grid_columnconfigure(0, weight=1)
+
+        self.results_text = tk.Text(
+            results_frame,
+            height=8,
+            wrap=tk.WORD,
+            font=("Consolas", 10)
         )
-        self.results_display.pack(fill=tk.X, padx=5, pady=2)
+        self.results_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # Scrollbar for results
+        results_scroll = ttk.Scrollbar(
+            results_frame,
+            orient="vertical",
+            command=self.results_text.yview
+        )
+        results_scroll.grid(row=0, column=1, sticky="ns")
+        self.results_text.configure(yscrollcommand=results_scroll.set)
+
+        # Start periodic updates
+        self.update_statistics()
 
     def toggle_scanning(self):
         """Toggle wallet scanning on/off."""
@@ -327,38 +354,44 @@ class WalletFrame(ttk.Frame):
             self.progress.start()
             self.thread_spinbox.config(state='disabled')  # Disable during scanning
             self.update_statistics()
-            self.results_display.config(text="Scanning in progress...")
+            self.results_text.delete("1.0", tk.END) #added to clear previous text
+            self.results_text.insert(tk.END, "Scanning in progress...")
         else:
             # Stop scanning
             self.wallet_scanner.stop_scan()
             self.scan_button.config(text="▶ Start Scanning")
             self.progress.stop()
             self.thread_spinbox.config(state='normal')  # Re-enable after stopping
-            self.results_display.config(text="Scanning stopped")
+            self.results_text.insert(tk.END, "Scanning stopped")
 
     def update_statistics(self):
         """Update scanning statistics display."""
         if self.wallet_scanner.scanning:
             stats = self.wallet_scanner.get_statistics()
-            cpu_rate = float(stats['cpu_scan_rate'])
-            gpu_rate = float(stats['gpu_scan_rate'])
-            total_rate = cpu_rate + gpu_rate
+            
+            try:
+                cpu_rate = float(stats['cpu_scan_rate'])
+                gpu_rate = float(stats['gpu_scan_rate'])
+                total_rate = cpu_rate + gpu_rate
+                self.rate_label.config(
+                    text=f"Processing Rate: {total_rate:,.1f} wallets/min "
+                         f"(CPU: {cpu_rate:,.1f}/min, GPU: {gpu_rate:,.1f}/min)"
+                )
+            except KeyError:
+                self.rate_label.config(text = "Rate: Calculating...")
 
-            # Update rate label
-            self.rate_label.config(
-                text=f"Processing Rate: {total_rate:,.1f} wallets/min "
-                     f"(CPU: {cpu_rate:,.1f}/min, GPU: {gpu_rate:,.1f}/min)"
-            )
+            for key, label in self.stats_labels.items():
+                try:
+                    value = stats[key]
+                    label.config(text=str(value))
+                except KeyError:
+                    label.config(text="--")
 
-            self.stats_text.set(
-                f"Total Scanned: {stats['total_scanned']} | "
-                f"With Balance: {stats['wallets_with_balance']} | "
-                f"Active Threads: {stats['active_threads']} | "
-                f"Queue: {stats['queue_size']}"
-            )
+            self.progress_var.set(stats.get('progress',0))
 
             # Continue updating while scanning
-            self.after(100, self.update_statistics)
+            self.after(1000, self.update_statistics)
+
 
     def update_thread_count(self):
         """Update the number of scanning threads."""
