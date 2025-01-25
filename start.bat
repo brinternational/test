@@ -1,6 +1,9 @@
 @echo off
 echo Starting Bitcoin Education App Setup...
 
+REM Set PyOpenCL compiler output
+set PYOPENCL_COMPILER_OUTPUT=1
+
 REM Remove old directory if it exists
 if exist test (
     echo Removing old test directory...
