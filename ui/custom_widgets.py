@@ -368,26 +368,30 @@ class WalletFrame(ttk.Frame):
         """Update scanning statistics display."""
         if self.wallet_scanner.scanning:
             stats = self.wallet_scanner.get_statistics()
-            
+
             try:
-                cpu_rate = float(stats['cpu_scan_rate'])
-                gpu_rate = float(stats['gpu_scan_rate'])
+                # Remove commas before converting to float
+                cpu_rate = float(stats['cpu_scan_rate'].replace(',', ''))
+                gpu_rate = float(stats['gpu_scan_rate'].replace(',', ''))
                 total_rate = cpu_rate + gpu_rate
                 self.rate_label.config(
                     text=f"Processing Rate: {total_rate:,.1f} wallets/min "
                          f"(CPU: {cpu_rate:,.1f}/min, GPU: {gpu_rate:,.1f}/min)"
                 )
-            except KeyError:
-                self.rate_label.config(text = "Rate: Calculating...")
+            except (KeyError, ValueError, AttributeError):
+                self.rate_label.config(text="Rate: Calculating...")
 
             for key, label in self.stats_labels.items():
                 try:
                     value = stats[key]
+                    # Format numbers with commas for display
+                    if isinstance(value, (int, float)):
+                        value = f"{value:,}"
                     label.config(text=str(value))
-                except KeyError:
+                except (KeyError, ValueError):
                     label.config(text="--")
 
-            self.progress_var.set(stats.get('progress',0))
+            self.progress_var.set(stats.get('progress', 0))
 
             # Continue updating while scanning
             self.after(1000, self.update_statistics)
