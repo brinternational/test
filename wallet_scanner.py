@@ -2,31 +2,31 @@ import time
 from typing import Dict, List, Deque
 from datetime import datetime
 import os
+import logging
 import threading
 import multiprocessing
 from queue import Queue, Empty
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-import logging
-from wallet_generator import WalletGenerator
 import base58
 import hashlib
 from gpu_hasher import GPUHasher
 import uuid
+from wallet_generator import WalletGenerator  # Re-add the import
 
 class WalletScanner:
     # Class variable to track instance count
     _instance_counter = multiprocessing.Value('i', 0)
 
     def __init__(self):
-        self.scanning = False
         # Generate unique instance ID and number
         self.instance_id = str(uuid.uuid4())[:8]
         with WalletScanner._instance_counter.get_lock():
             WalletScanner._instance_counter.value += 1
             self.instance_number = WalletScanner._instance_counter.value
 
-        # Get physical core count using multiprocessing
+        # Initialize core attributes
+        self.scanning = False
         self.cpu_thread_count = max(multiprocessing.cpu_count() // 2, 1)  # Use half of logical cores
         self.gpu_thread_count = 256
         self._executor = None
@@ -42,6 +42,11 @@ class WalletScanner:
         # Adjust batch sizes for multi-instance operation
         self.CPU_BATCH_SIZE = max(1000 * (self.cpu_thread_count // 2), 2500)  # Reduced for multi-instance
         self.GPU_BATCH_SIZE = 5000  # Reduced for multi-instance
+
+        # Save directory configuration with normalized path
+        base_dir = "C:/temp" if os.name == 'nt' else "/tmp"
+        self.save_dir = os.path.normpath(base_dir)
+        self._setup_save_directory()
 
         # Initialize GPU acceleration if available
         try:
@@ -73,10 +78,6 @@ class WalletScanner:
         self.last_cpu_time = None
         self.last_gpu_time = None
 
-        # Save directory configuration
-        self.save_dir = os.path.join(os.path.expanduser("~"), "temp")
-        self._setup_save_directory()
-
     def _setup_save_directory(self):
         """Setup wallet directory."""
         try:
@@ -84,9 +85,16 @@ class WalletScanner:
             logging.info(f"Instance {self.instance_id}: Using wallet directory: {self.save_dir}")
         except Exception as e:
             logging.error(f"Instance {self.instance_id}: Failed to create directory {self.save_dir}: {str(e)}")
-            self.save_dir = os.path.join(os.getcwd(), "wallets")
-            os.makedirs(self.save_dir, exist_ok=True)
-            logging.info(f"Instance {self.instance_id}: Using fallback directory: {self.save_dir}")
+            self.save_dir = os.path.normpath("C:/test/temp")  # Fallback to C:\test\temp
+            try:
+                os.makedirs(self.save_dir, exist_ok=True)
+                logging.info(f"Instance {self.instance_id}: Using fallback directory: {self.save_dir}")
+            except Exception as e2:
+                logging.error(f"Instance {self.instance_id}: Failed to create fallback directory: {str(e2)}")
+                # Final fallback to current directory
+                self.save_dir = os.path.join(os.getcwd(), "wallets")
+                os.makedirs(self.save_dir, exist_ok=True)
+                logging.info(f"Instance {self.instance_id}: Using final fallback directory: {self.save_dir}")
 
     def _get_wallet_filename(self):
         """Get the wallet filename for this instance."""

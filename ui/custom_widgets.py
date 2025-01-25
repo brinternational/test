@@ -263,6 +263,7 @@ class WalletFrame(ttk.Frame):
         )
         self.mode_label.pack(side=tk.RIGHT)
 
+
         # Prominent scan button
         self.scan_button = ttk.Button(
             scrollable_frame,
