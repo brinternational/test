@@ -2,10 +2,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import sys
 from ui.theme import setup_theme
-from ui.custom_widgets import EducationalFrame, WalletFrame, SHA256Frame, NodeSettingsFrame
+from ui.custom_widgets import WalletFrame, NodeSettingsFrame
 from version import get_version_info
 from bitcoin_utils import BitcoinUtils
-from instance_controller import InstanceManagerFrame  # Added import
+from instance_controller import InstanceManagerFrame
 import logging
 import os
 
@@ -59,17 +59,13 @@ class BitcoinEducationApp(tk.Tk):
             self.notebook.pack(fill=tk.BOTH, expand=True)
 
             # Create and add frames
-            self.instance_manager_frame = InstanceManagerFrame(self.notebook)  # Added instance manager
-            self.educational_frame = EducationalFrame(self.notebook)
+            self.instance_manager_frame = InstanceManagerFrame(self.notebook)
             self.wallet_frame = WalletFrame(self.notebook)
-            self.sha256_frame = SHA256Frame(self.notebook)
             self.node_settings_frame = NodeSettingsFrame(self.notebook)
 
             # Add tabs in preferred order
-            self.notebook.add(self.instance_manager_frame, text="Instances")  # Added first
-            self.notebook.add(self.educational_frame, text="Learn")
+            self.notebook.add(self.instance_manager_frame, text="Instances")
             self.notebook.add(self.wallet_frame, text="Wallet")
-            self.notebook.add(self.sha256_frame, text="SHA256")
             self.notebook.add(self.node_settings_frame, text="Node Settings")
 
             # Test node connection and update status
@@ -92,7 +88,7 @@ class BitcoinEducationApp(tk.Tk):
                 "Not connected to Bitcoin node. Please configure node settings before scanning."
             )
             # Switch to node settings tab
-            self.notebook.select(4)  # Updated index for node_settings_frame
+            self.notebook.select(2)
 
     def on_closing(self):
         """Clean up resources before closing the application."""
