@@ -1,149 +1,191 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import sys
-import socket
-from ui.theme import setup_theme
-from ui.custom_widgets import WalletFrame, NodeSettingsFrame
-from version import get_version_info
-from bitcoin_utils import BitcoinUtils
-from instance_controller import ProcessManagerFrame
 import logging
 import os
 import threading
-import time
-from typing import Optional
-from flask import Flask
-from threading import Thread
+from datetime import datetime
+from wallet_scanner import WalletScanner
+from typing import Dict
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(),
         logging.FileHandler('bitcoin_wallet.log')
     ]
 )
 
-# Initialize Flask app
-flask_app = Flask(__name__)
+class WalletScannerTab(ttk.Frame):
+    def __init__(self, parent, tab_id: str):
+        super().__init__(parent)
+        self.tab_id = tab_id
+        self.scanner = WalletScanner()
+        self.setup_ui()
 
-@flask_app.route('/')
-def home():
-    return "Bitcoin Education App API"
+    def setup_ui(self):
+        # Configure grid
+        self.grid_columnconfigure(0, weight=1)
 
-def run_flask():
-    """Run Flask server with consistent port."""
-    try:
-        port = 44555  # Using a fixed port
-        logging.info(f"Starting Flask server on port {port}")
-        flask_app.run(host='0.0.0.0', port=port)
-    except Exception as e:
-        logging.error(f"Flask server error: {str(e)}")
-        raise
+        # Status Frame
+        status_frame = ttk.LabelFrame(self, text="Scanner Status")
+        status_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+
+        # Control buttons
+        btn_frame = ttk.Frame(status_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.start_btn = ttk.Button(btn_frame, text="Start Scanning", command=self.start_scanning)
+        self.start_btn.pack(side=tk.LEFT, padx=5)
+
+        self.stop_btn = ttk.Button(btn_frame, text="Stop Scanning", command=self.stop_scanning)
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+        self.stop_btn['state'] = 'disabled'
+
+        # Statistics Frame
+        stats_frame = ttk.LabelFrame(self, text="Statistics")
+        stats_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+
+        self.stats_text = tk.Text(stats_frame, height=10, width=50)
+        self.stats_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
+
+        # Start statistics update thread
+        self.update_thread = threading.Thread(target=self.update_stats, daemon=True)
+        self.update_thread.start()
+
+    def start_scanning(self):
+        try:
+            self.scanner.start_scan()
+            self.start_btn['state'] = 'disabled'
+            self.stop_btn['state'] = 'normal'
+            logging.info(f"Scanner started in tab {self.tab_id}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start scanner: {str(e)}")
+            logging.error(f"Failed to start scanner in tab {self.tab_id}: {str(e)}")
+
+    def stop_scanning(self):
+        try:
+            self.scanner.stop_scan()
+            self.start_btn['state'] = 'normal'
+            self.stop_btn['state'] = 'disabled'
+            logging.info(f"Scanner stopped in tab {self.tab_id}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to stop scanner: {str(e)}")
+            logging.error(f"Failed to stop scanner in tab {self.tab_id}: {str(e)}")
+
+    def update_stats(self):
+        while True:
+            try:
+                if hasattr(self, 'stats_text'):
+                    stats = self.scanner.get_statistics()
+                    stats_text = (
+                        f"Total Scanned: {stats['total_scanned']}\n"
+                        f"CPU Processed: {stats['cpu_processed']}\n"
+                        f"GPU Processed: {stats['gpu_processed']}\n"
+                        f"Found Wallets: {stats['wallets_with_balance']}\n"
+                        f"CPU Scan Rate: {stats['cpu_scan_rate']}/min\n"
+                        f"GPU Scan Rate: {stats['gpu_scan_rate']}/min\n"
+                        f"Queue Size: {stats['queue_size']}\n"
+                        f"Last Updated: {datetime.now().strftime('%H:%M:%S')}"
+                    )
+
+                    self.stats_text.delete(1.0, tk.END)
+                    self.stats_text.insert(tk.END, stats_text)
+            except Exception as e:
+                logging.error(f"Error updating stats in tab {self.tab_id}: {str(e)}")
+            finally:
+                threading.Event().wait(1.0)  # Update every second
 
 class BitcoinEducationApp(tk.Tk):
     def __init__(self):
-        try:
-            super().__init__()
+        super().__init__()
 
-            # Create temp directory for wallets
-            temp_dir = os.path.join("C:", "temp")
-            os.makedirs(temp_dir, exist_ok=True)
-            logging.info(f"Temp directory created/verified: {temp_dir}")
+        # Create temp directory for wallets
+        os.makedirs("C:/temp", exist_ok=True)
 
-            # Log version information
-            version_info = get_version_info()
-            logging.info(f"Starting Bitcoin Wallet Education v{version_info['version']}")
-            logging.info(f"Build Date: {version_info['build_date']}")
-            logging.info(f"Runtime: {version_info['runtime_timestamp']}")
+        self.title("Bitcoin Wallet Education")
+        self.geometry("800x600")
 
-            # Basic window setup
-            self.title(f"Bitcoin Wallet Education v{version_info['version']}")
-            self.geometry("1024x768")
+        # Setup main container
+        self.container = ttk.Frame(self)
+        self.container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            # Setup theme
-            setup_theme(self)
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(self.container)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
-            # Create main container
-            self.container = ttk.Frame(self)
-            self.container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Add control buttons
+        self.setup_controls()
 
-            # Setup notebook with tabs
-            self.notebook = ttk.Notebook(self.container)
-            self.notebook.pack(fill=tk.BOTH, expand=True)
+        # Dictionary to store tabs
+        self.tabs: Dict[str, WalletScannerTab] = {}
 
-            # Create and add process manager frame
-            self.process_manager_frame = ProcessManagerFrame(self.notebook, self)
-            self.node_settings_frame = NodeSettingsFrame(self.notebook)
+        # Create initial tab
+        self.add_scanner_tab()
 
-            # Add main tabs
-            self.notebook.add(self.process_manager_frame, text="Processes")
-            self.notebook.add(self.node_settings_frame, text="Node Settings")
+    def setup_controls(self):
+        control_frame = ttk.Frame(self.container)
+        control_frame.pack(fill=tk.X, padx=5, pady=5)
 
-            # Dictionary to track process tabs
-            self.process_tabs = {}
+        ttk.Button(
+            control_frame,
+            text="Add Scanner",
+            command=self.add_scanner_tab
+        ).pack(side=tk.LEFT, padx=5)
 
-            # Bind cleanup to window closing
-            self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        ttk.Button(
+            control_frame,
+            text="Remove Current Scanner",
+            command=self.remove_current_tab
+        ).pack(side=tk.LEFT, padx=5)
 
-            logging.info("Application initialized successfully")
+    def add_scanner_tab(self):
+        if len(self.tabs) >= 4:  # Limit to 4 scanners
+            messagebox.showwarning(
+                "Limit Reached",
+                "Maximum number of scanners (4) reached."
+            )
+            return
 
-        except Exception as e:
-            logging.error(f"Error during initialization: {str(e)}")
-            messagebox.showerror("Error", f"Failed to start: {str(e)}")
-            raise
+        tab_id = f"scanner_{len(self.tabs) + 1}"
+        scanner_tab = WalletScannerTab(self.notebook, tab_id)
+        self.notebook.add(scanner_tab, text=f"Scanner {len(self.tabs) + 1}")
+        self.tabs[tab_id] = scanner_tab
+        self.notebook.select(scanner_tab)
 
-    def add_process_tab(self, process_id: str):
-        """Add a new process tab to the notebook."""
-        if process_id not in self.process_tabs:
-            try:
-                process_frame = WalletFrame(self.notebook)
-                self.notebook.add(process_frame, text=f"Process {process_id}")
-                self.process_tabs[process_id] = process_frame
-                self.notebook.select(self.notebook.index(process_frame))
-                logging.info(f"Added new process tab: {process_id}")
-                return process_frame
-            except Exception as e:
-                logging.error(f"Error adding process tab {process_id}: {str(e)}")
-                return None
-        return None
+    def remove_current_tab(self):
+        current_tab = self.notebook.select()
+        if not current_tab:
+            return
 
-    def remove_process_tab(self, process_id: str):
-        """Remove a process tab from the notebook."""
-        if process_id in self.process_tabs:
-            try:
-                process_frame = self.process_tabs[process_id]
-                self.notebook.forget(self.notebook.index(process_frame))
-                del self.process_tabs[process_id]
-                logging.info(f"Removed process tab: {process_id}")
-            except Exception as e:
-                logging.error(f"Error removing process tab {process_id}: {str(e)}")
+        tab_id = None
+        for id, tab in self.tabs.items():
+            if str(tab) == str(current_tab):
+                tab_id = id
+                break
+
+        if tab_id:
+            self.tabs[tab_id].stop_scanning()  # Stop the scanner
+            self.notebook.forget(current_tab)  # Remove the tab
+            del self.tabs[tab_id]  # Remove from our dictionary
 
     def on_closing(self):
-        """Clean up resources before closing."""
+        """Handle application shutdown."""
         try:
-            for process_id in list(self.process_tabs.keys()):
-                self.remove_process_tab(process_id)
-            logging.info("Successfully stopped all processes")
+            # Stop all scanners
+            for tab in self.tabs.values():
+                tab.stop_scanning()
+            self.quit()
         except Exception as e:
-            logging.error(f"Error stopping processes: {str(e)}")
-        finally:
+            logging.error(f"Error during shutdown: {str(e)}")
             self.quit()
 
 if __name__ == "__main__":
     try:
-        # Start Flask server in a separate thread
-        flask_thread = Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        logging.info("Flask server thread started")
-
-        # Give Flask time to start
-        time.sleep(1)
-
-        # Start Tkinter application
         app = BitcoinEducationApp()
+        app.protocol("WM_DELETE_WINDOW", app.on_closing)
         app.mainloop()
     except Exception as e:
         logging.error(f"Fatal error: {str(e)}")
-        sys.exit(1)
+        messagebox.showerror("Fatal Error", str(e))
