@@ -6,6 +6,8 @@ import threading
 from datetime import datetime
 from wallet_scanner import WalletScanner
 from typing import Dict
+from bitcoin_utils import BitcoinUtils # Added import for BitcoinUtils
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -16,6 +18,58 @@ logging.basicConfig(
         logging.FileHandler('bitcoin_wallet.log')
     ]
 )
+
+class NodeSettingsFrame(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.bitcoin_utils = BitcoinUtils()
+        self.setup_ui()
+        self.check_connection()
+
+    def setup_ui(self):
+        # Configure grid
+        self.grid_columnconfigure(0, weight=1)
+
+        # Node Settings Frame
+        settings_frame = ttk.LabelFrame(self, text="Bitcoin Node Settings")
+        settings_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+
+        # Connection status
+        status_frame = ttk.Frame(settings_frame)
+        status_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(status_frame, text="Connection Status:").pack(side=tk.LEFT, padx=5)
+        self.status_label = ttk.Label(status_frame, text="Checking...")
+        self.status_label.pack(side=tk.LEFT, padx=5)
+
+        # Node info display
+        self.info_text = tk.Text(settings_frame, height=10, width=50)
+        self.info_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
+
+        # Test connection button
+        ttk.Button(
+            settings_frame,
+            text="Test Connection",
+            command=self.check_connection
+        ).pack(pady=5)
+
+    def check_connection(self):
+        try:
+            node_info = self.bitcoin_utils.get_node_info()
+            if node_info:
+                self.status_label.config(text="Connected", foreground="green")
+                info_text = json.dumps(node_info, indent=2)
+            else:
+                self.status_label.config(text="Disconnected", foreground="red")
+                info_text = "Unable to connect to node. Using simulation mode."
+
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(tk.END, info_text)
+
+        except Exception as e:
+            self.status_label.config(text="Error", foreground="red")
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(tk.END, f"Error: {str(e)}\nUsing simulation mode.")
 
 class SummaryTab(ttk.Frame):
     def __init__(self, parent):
@@ -180,6 +234,9 @@ class BitcoinEducationApp(tk.Tk):
         self.container = ttk.Frame(self)
         self.container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+        # Add connection status indicator
+        self.setup_status_bar()
+
         # Create notebook for tabs
         self.notebook = ttk.Notebook(self.container)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -194,11 +251,56 @@ class BitcoinEducationApp(tk.Tk):
         self.summary_tab = SummaryTab(self.notebook)
         self.notebook.add(self.summary_tab, text="Summary")
 
+        # Create node settings tab
+        self.node_settings = NodeSettingsFrame(self.notebook)
+        self.notebook.add(self.node_settings, text="Node Settings")
+
         # Add get_combined_stats method to summary tab
         self.summary_tab.get_combined_stats = self.get_combined_stats
 
         # Create initial scanner tab
         self.add_scanner_tab()
+
+        # Start connection check thread
+        self.start_connection_check()
+
+    def setup_status_bar(self):
+        status_frame = ttk.Frame(self.container)
+        status_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.connection_indicator = ttk.Label(
+            status_frame, 
+            text="●",
+            font=("Arial", 12),
+            foreground="gray"
+        )
+        self.connection_indicator.pack(side=tk.LEFT, padx=5)
+
+        self.connection_text = ttk.Label(
+            status_frame,
+            text="Checking connection..."
+        )
+        self.connection_text.pack(side=tk.LEFT)
+
+    def start_connection_check(self):
+        def check_connection():
+            while True:
+                try:
+                    bitcoin_utils = BitcoinUtils()
+                    if bitcoin_utils.get_node_info():
+                        self.connection_indicator.config(foreground="green")
+                        self.connection_text.config(text="Connected to node")
+                    else:
+                        self.connection_indicator.config(foreground="red")
+                        self.connection_text.config(text="Simulation mode")
+                except Exception:
+                    self.connection_indicator.config(foreground="red")
+                    self.connection_text.config(text="Simulation mode")
+                finally:
+                    threading.Event().wait(5.0)  # Check every 5 seconds
+
+        thread = threading.Thread(target=check_connection, daemon=True)
+        thread.start()
 
     def setup_controls(self):
         control_frame = ttk.Frame(self.container)
@@ -269,7 +371,7 @@ class BitcoinEducationApp(tk.Tk):
 
     def remove_current_tab(self):
         current_tab = self.notebook.select()
-        if not current_tab or str(current_tab) == str(self.summary_tab):
+        if not current_tab or str(current_tab) == str(self.summary_tab) or str(current_tab) == str(self.node_settings): #Added node_settings check
             return
 
         tab_id = None
