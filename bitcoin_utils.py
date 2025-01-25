@@ -83,6 +83,25 @@ class BitcoinUtils:
         }
 
     @classmethod
+    def save_config(cls, url: str, port: str, wallet_dir: str):
+        """Save configuration to file."""
+        try:
+            config_content = f"""# Bitcoin Node Configuration
+url={url}
+port={port}
+username={cls.RPC_USER}
+password={cls.RPC_PASS}
+wallet_dir={wallet_dir}
+"""
+            os.makedirs(os.path.dirname(cls.CONFIG_FILE), exist_ok=True)
+            with open(cls.CONFIG_FILE, 'w') as f:
+                f.write(config_content)
+            return True
+        except Exception as e:
+            print(f"Error saving config: {str(e)}")
+            return False
+
+    @classmethod
     def load_config(cls):
         """Load configuration from C:\temp\node_settings.txt"""
         try:

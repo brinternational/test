@@ -38,35 +38,112 @@ class NodeSettingsFrame(ttk.Frame):
         status_frame = ttk.Frame(settings_frame)
         status_frame.pack(fill=tk.X, padx=5, pady=5)
 
+        self.status_indicator = ttk.Label(
+            status_frame, 
+            text="●",
+            font=("Arial", 12),
+            foreground="gray"
+        )
+        self.status_indicator.pack(side=tk.LEFT, padx=5)
+
         ttk.Label(status_frame, text="Connection Status:").pack(side=tk.LEFT, padx=5)
         self.status_label = ttk.Label(status_frame, text="Checking...")
         self.status_label.pack(side=tk.LEFT, padx=5)
+
+        # Node Settings
+        settings_container = ttk.Frame(settings_frame)
+        settings_container.pack(fill=tk.X, padx=5, pady=5)
+
+        # Node URL
+        url_frame = ttk.Frame(settings_container)
+        url_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(url_frame, text="Node URL:").pack(side=tk.LEFT, padx=5)
+        self.url_var = tk.StringVar(value=self.bitcoin_utils.NODE_URL)
+        ttk.Entry(url_frame, textvariable=self.url_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        # Node Port
+        port_frame = ttk.Frame(settings_container)
+        port_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(port_frame, text="Port:").pack(side=tk.LEFT, padx=5)
+        self.port_var = tk.StringVar(value=self.bitcoin_utils.NODE_PORT)
+        ttk.Entry(port_frame, textvariable=self.port_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        # Wallet Save Location
+        wallet_frame = ttk.Frame(settings_container)
+        wallet_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(wallet_frame, text="Wallet Save Location:").pack(side=tk.LEFT, padx=5)
+        self.wallet_dir_var = tk.StringVar(value="C:/temp")
+        ttk.Entry(wallet_frame, textvariable=self.wallet_dir_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        ttk.Button(wallet_frame, text="Browse", command=self.browse_wallet_dir).pack(side=tk.LEFT, padx=5)
+
+        # Buttons
+        button_frame = ttk.Frame(settings_container)
+        button_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(
+            button_frame,
+            text="Save Settings",
+            command=self.save_settings
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            button_frame,
+            text="Test Connection",
+            command=self.check_connection
+        ).pack(side=tk.LEFT, padx=5)
 
         # Node info display
         self.info_text = tk.Text(settings_frame, height=10, width=50)
         self.info_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
 
-        # Test connection button
-        ttk.Button(
-            settings_frame,
-            text="Test Connection",
-            command=self.check_connection
-        ).pack(pady=5)
+    def browse_wallet_dir(self):
+        from tkinter import filedialog
+        directory = filedialog.askdirectory(initialdir=self.wallet_dir_var.get())
+        if directory:
+            self.wallet_dir_var.set(directory)
+
+    def save_settings(self):
+        try:
+            # Update Bitcoin Utils settings
+            self.bitcoin_utils.configure_node(
+                self.url_var.get(),
+                self.port_var.get(),
+                self.bitcoin_utils.RPC_USER,  # Keep existing RPC credentials
+                self.bitcoin_utils.RPC_PASS
+            )
+
+            # Save wallet directory
+            wallet_dir = self.wallet_dir_var.get()
+            os.makedirs(wallet_dir, exist_ok=True)
+
+            # Update config file
+            self.bitcoin_utils.save_config(
+                url=self.url_var.get(),
+                port=self.port_var.get(),
+                wallet_dir=wallet_dir
+            )
+
+            messagebox.showinfo("Success", "Settings saved successfully")
+            self.check_connection()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
 
     def check_connection(self):
         try:
-            node_info = self.bitcoin_utils.get_node_info()
-            if node_info:
+            success, info = self.bitcoin_utils.test_node_connection()
+
+            if success:
+                self.status_indicator.config(foreground="green")
                 self.status_label.config(text="Connected", foreground="green")
-                info_text = json.dumps(node_info, indent=2)
             else:
+                self.status_indicator.config(foreground="red")
                 self.status_label.config(text="Disconnected", foreground="red")
-                info_text = "Unable to connect to node. Using simulation mode."
 
             self.info_text.delete(1.0, tk.END)
-            self.info_text.insert(tk.END, info_text)
+            self.info_text.insert(tk.END, info)
 
         except Exception as e:
+            self.status_indicator.config(foreground="red")
             self.status_label.config(text="Error", foreground="red")
             self.info_text.delete(1.0, tk.END)
             self.info_text.insert(tk.END, f"Error: {str(e)}\nUsing simulation mode.")
