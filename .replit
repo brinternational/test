@@ -29,6 +29,7 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python main.py"
+waitForPort = 5000
 
 [[workflows.workflow]]
 name = "Test Bitcoin Node"
