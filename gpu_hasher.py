@@ -2,6 +2,7 @@ import pyopencl as cl
 import numpy as np
 from typing import List, Optional
 import logging
+import os
 
 class GPUHasher:
     # OpenCL kernel code
@@ -87,6 +88,17 @@ class GPUHasher:
     """
 
     def __init__(self, enable_cpu=True, enable_gpu=True, enable_npu=True, gpu_threads=256):
+        # Clear OpenCL cache before initialization
+        cache_dir = os.path.expanduser(os.path.join("~", ".cache", "pyopencl"))
+        if os.path.exists(cache_dir):
+            try:
+                for cache_file in os.listdir(cache_dir):
+                    if cache_file.endswith(".py"):
+                        os.remove(os.path.join(cache_dir, cache_file))
+                logging.info("Cleared OpenCL cache")
+            except Exception as e:
+                logging.warning(f"Failed to clear OpenCL cache: {e}")
+
         self.ctx = None
         self.queue = None
         self.program = None
@@ -152,6 +164,11 @@ class GPUHasher:
     def _initialize_accelerator(self):
         """Initialize OpenCL with improved platform and device detection."""
         try:
+            # Set environment variables for Adreno GPU
+            os.environ['PYOPENCL_CTX'] = '0'  # Force first device
+            os.environ['PYOPENCL_COMPILER_OUTPUT'] = '1'  # Show compiler output
+            os.environ['PYOPENCL_NO_CACHE'] = '1'  # Disable caching during development
+
             platform_info = self._detect_available_platforms()
             if not platform_info:
                 logging.warning("No OpenCL platforms detected")
@@ -167,39 +184,73 @@ class GPUHasher:
                     logging.info(f"    Vendor: {device['vendor']}")
                     logging.info(f"    Compute Units: {device['compute_units']}")
 
-            # Try to find the best device
-            selected_device = None
 
             # First, try to find Qualcomm GPU
             if self.enable_gpu:
                 selected_device = self._find_qualcomm_device()
+                if selected_device:
+                    logging.info(f"Selected Qualcomm device: {selected_device.name}")
+                    # Specific options for Qualcomm Adreno GPU
+                    build_options = [
+                        "-cl-std=CL1.2",
+                        "-cl-mad-enable",
+                        "-cl-fast-relaxed-math",
+                        "-cl-no-signed-zeros",
+                        "-cl-denorms-are-zero"
+                    ]
+                    logging.info(f"Using Qualcomm-specific build options: {build_options}")
+                else:
+                    logging.warning("No Qualcomm GPU device found")
+                    build_options = []
 
             # If no Qualcomm device, try other GPUs
             if not selected_device and self.enable_gpu:
                 selected_device = self._find_best_gpu()
+                if selected_device:
+                    logging.info(f"Selected GPU device: {selected_device.name}")
+                    build_options = []
 
             # Finally, fall back to CPU if needed
             if not selected_device and self.enable_cpu:
                 selected_device = self._find_cpu_device()
+                if selected_device:
+                    logging.info("Falling back to CPU device")
+                    build_options = []
 
             if not selected_device:
                 logging.warning("No suitable compute device found")
                 self._fallback_to_cpu()
                 return
 
-            # Initialize OpenCL context and command queue
-            self.ctx = cl.Context([selected_device])
-            self.queue = cl.CommandQueue(self.ctx)
-            self.program = cl.Program(self.ctx, self.KERNEL_CODE).build()
+            # Initialize OpenCL context and command queue with error checking
+            try:
+                self.ctx = cl.Context([selected_device])
+                self.queue = cl.CommandQueue(self.ctx)
 
-            # Update device configuration
-            self.max_work_group_size = min(256, selected_device.max_work_group_size)
-            self.device_type = "GPU" if selected_device.type in [cl.device_type.GPU, cl.device_type.ACCELERATOR] else "CPU"
+                # Build program with detailed error handling
+                try:
+                    self.program = cl.Program(self.ctx, self.KERNEL_CODE)
+                    logging.info("Created OpenCL program, attempting to build...")
+                    self.program.build(options=build_options)
+                    logging.info("Successfully built OpenCL program")
+                except cl.RuntimeError as e:
+                    logging.error(f"OpenCL build error: {e}")
+                    logging.error(f"Build log: {self.program.get_build_info(selected_device, cl.program_build_info.LOG)}")
+                    raise
 
-            logging.info(f"Successfully initialized {self.device_type} acceleration")
-            logging.info(f"Selected device: {selected_device.name}")
-            logging.info(f"Work group size: {self.max_work_group_size}")
-            logging.info(f"Compute units: {selected_device.max_compute_units}")
+                # Update device configuration
+                self.max_work_group_size = min(256, selected_device.max_work_group_size)
+                self.device_type = "GPU" if selected_device.type in [cl.device_type.GPU, cl.device_type.ACCELERATOR] else "CPU"
+
+                logging.info(f"Device initialization complete:")
+                logging.info(f"- Device: {selected_device.name}")
+                logging.info(f"- Type: {self.device_type}")
+                logging.info(f"- Work group size: {self.max_work_group_size}")
+                logging.info(f"- Compute units: {selected_device.max_compute_units}")
+
+            except cl.RuntimeError as e:
+                logging.error(f"OpenCL initialization error: {str(e)}")
+                self._fallback_to_cpu()
 
         except Exception as e:
             logging.error(f"Accelerator initialization failed: {str(e)}")

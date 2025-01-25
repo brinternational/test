@@ -3,6 +3,14 @@ echo Starting Bitcoin Education App Setup...
 
 REM Set PyOpenCL compiler output
 set PYOPENCL_COMPILER_OUTPUT=1
+set PYOPENCL_CTX=0
+
+REM Set OpenCL paths for cache
+set PYOPENCL_NO_CACHE=1
+set ADRENO_CACHE_PATH=%LOCALAPPDATA%\AdrenalineCache
+
+REM Set Python Scripts path
+set PATH=%PATH%;C:\Users\bmorr\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\Scripts
 
 REM Remove old directory if it exists
 if exist test (
