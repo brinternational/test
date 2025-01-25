@@ -18,6 +18,10 @@ from bitcoin_utils import BitcoinUtils
 class WalletScanner:
     _instance_counter = multiprocessing.Value('i', 0)
 
+    # Add class-level batch size constants
+    CPU_BATCH_SIZE = 1000
+    GPU_BATCH_SIZE = 10000
+
     def __init__(self):
         self.instance_id = str(uuid.uuid4())[:8]
         with WalletScanner._instance_counter.get_lock():
@@ -59,6 +63,7 @@ class WalletScanner:
 
         self.cpu_scan_rates = deque(maxlen=10)
         self.gpu_scan_rates = deque(maxlen=10)
+        self.scan_rates = deque(maxlen=10)  # Combined rates
         self.last_cpu_time = None
         self.last_gpu_time = None
 
@@ -151,62 +156,6 @@ class WalletScanner:
         threading.current_thread().name = f"WalletScanner-{self.instance_id}-{os.getpid()}"
         logging.info(f"Instance {self.instance_id}: Worker process {os.getpid()} initialized")
 
-    def _process_batch_gpu(self, batch: List[Dict]) -> List[Dict]:
-        try:
-            results = []
-            entropies = [wallet_data['entropy'] for wallet_data in batch]
-            version_bytes = [b'\x00' for _ in batch]
-            combined = [v + e[:20] for v, e in zip(version_bytes, entropies)]
-            checksums = self.gpu_hasher.compute_hash_batch(combined)
-            for i, (wallet_data, checksum) in enumerate(zip(batch, checksums)):
-                combined_data = version_bytes[i] + entropies[i][:20] + checksum[:4]
-                address = base58.b58encode(combined_data).decode('utf-8')
-                addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest(), 'big')
-                if addr_hash % 10000000 == 0:
-                    balance = float(addr_hash % 100) / 100000
-                    if balance > 0:
-                        logging.info(f"Instance {self.instance_id}: [Simulation] Found wallet with balance: {balance} BTC")
-                        results.append({
-                            'seed_phrase': wallet_data['seed_phrase'],
-                            'address': address,
-                            'balance': balance,
-                            'found_at': wallet_data['timestamp']
-                        })
-            return results
-        except Exception as e:
-            logging.error(f"Instance {self.instance_id}: Error in GPU batch processing: {str(e)}")
-            return self._process_batch_cpu(batch)
-
-    def _process_batch_cpu(self, batch: List[Dict]) -> List[Dict]:
-        try:
-            results = []
-            for chunk_start in range(0, len(batch), 1000):
-                chunk = batch[chunk_start:chunk_start + 1000]
-                chunk_addresses = []
-                for wallet_data in chunk:
-                    entropy = wallet_data['entropy']
-                    version_byte = b'\x00'
-                    combined = version_byte + entropy[:20]
-                    checksum = hashlib.sha256(hashlib.sha256(combined).digest()).digest()[:4]
-                    address = base58.b58encode(combined + checksum).decode('utf-8')
-                    chunk_addresses.append(address)
-                for wallet_data, address in zip(chunk, chunk_addresses):
-                    addr_hash = int.from_bytes(hashlib.sha256(address.encode()).digest(), 'big')
-                    if addr_hash % 10000000 == 0:
-                        balance = float(addr_hash % 100) / 100000
-                        if balance > 0:
-                            logging.info(f"Instance {self.instance_id}: [Simulation] Found wallet with balance: {balance} BTC")
-                            results.append({
-                                'seed_phrase': wallet_data['seed_phrase'],
-                                'address': address,
-                                'balance': balance,
-                                'found_at': wallet_data['timestamp']
-                            })
-            return results
-        except Exception as e:
-            logging.error(f"Instance {self.instance_id}: Error processing batch: {str(e)}")
-            return []
-
     def _process_batch(self, batch: List[Dict]) -> List[Dict]:
         """Process a batch of addresses with live node verification."""
         try:
@@ -215,6 +164,8 @@ class WalletScanner:
             node_info = BitcoinUtils.get_node_info()
 
             results = []
+            batch_addresses = [wallet_data['address'] for wallet_data in batch]
+
             for wallet_data in batch:
                 try:
                     # Verify each address with the live node
@@ -230,13 +181,20 @@ class WalletScanner:
                         logging.info(f"Instance {self.instance_id}: Found wallet with balance: {balance} BTC")
                 except Exception as e:
                     logging.error(f"Instance {self.instance_id}: Error verifying wallet: {str(e)}")
-                    continue
+                    raise  # Fail entire batch if we can't verify wallets
 
             return results
         except Exception as e:
             logging.error(f"Instance {self.instance_id}: Batch processing failed - no live node connection: {str(e)}")
             self.stop_scan()  # Stop scanning if we lose node connection
             raise
+
+    def _process_batch_cpu(self, batch: List[Dict]) -> List[Dict]:
+        return self._process_batch(batch)
+
+    def _process_batch_gpu(self, batch: List[Dict]) -> List[Dict]:
+        return self._process_batch(batch)
+
 
     def _wallet_generator_worker(self):
         logging.info(f"Instance {self.instance_id}: Generator worker started")
@@ -336,8 +294,14 @@ class WalletScanner:
             with self._lock:
                 if not self.scanning:
                     logging.info(f"Instance {self.instance_id}: Starting scan with {self.cpu_thread_count} CPU cores")
-                    if self.gpu_enabled and self.gpu_hasher:
-                        logging.info(f"Instance {self.instance_id}: GPU enabled with {self.gpu_thread_count} threads")
+
+                    # Verify node connection before starting
+                    try:
+                        BitcoinUtils.verify_live_node()
+                        logging.info(f"Instance {self.instance_id}: Successfully connected to Bitcoin node")
+                    except Exception as e:
+                        logging.error(f"Instance {self.instance_id}: Failed to connect to Bitcoin node: {str(e)}")
+                        raise
 
                     self.scanning = True
                     self.start_time = time.time()
@@ -356,7 +320,6 @@ class WalletScanner:
                         self.gpu_processed.value = 0
 
                     self._cleanup_executors()
-
                     self._set_process_priority()
 
                     if os.name == 'nt':
@@ -371,17 +334,25 @@ class WalletScanner:
                         initializer=self._process_initializer
                     )
 
+                    # Start wallet generator
                     gen_future = self._executor.submit(self._wallet_generator_worker)
                     self._futures = [gen_future]
 
+                    # Start CPU workers
                     worker_count = executor_workers if os.name == 'nt' else self.cpu_thread_count
                     for _ in range(worker_count):
                         scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
 
+                    # Start GPU worker if enabled and available
                     if self.gpu_enabled and self.gpu_hasher:
-                        gpu_future = self._executor.submit(self._gpu_scan_worker)
-                        self._futures.append(gpu_future)
+                        try:
+                            gpu_future = self._executor.submit(self._gpu_scan_worker)
+                            self._futures.append(gpu_future)
+                            logging.info(f"Instance {self.instance_id}: GPU scanning enabled")
+                        except Exception as e:
+                            logging.warning(f"Instance {self.instance_id}: Failed to start GPU scanner: {str(e)}")
+                            self.gpu_enabled = False
 
         except Exception as e:
             logging.error(f"Instance {self.instance_id}: Error starting scan: {str(e)}")
@@ -469,13 +440,3 @@ class WalletScanner:
         except Exception as e:
             logging.warning(f"Instance {self.instance_id}: Hardware acceleration disabled: {str(e)}")
             self.gpu_hasher = None
-
-    def get_instance_info(self) -> Dict:
-        return {
-            'instance_id': self.instance_id,
-            'instance_number': self.instance_number,
-            'wallet_file': f"wallets{self.instance_number}.txt",
-            'cpu_threads': self.cpu_thread_count,
-            'gpu_enabled': bool(self.gpu_hasher),
-            'batch_size': self.CPU_BATCH_SIZE
-        }

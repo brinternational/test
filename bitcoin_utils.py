@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import base58
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import logging
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -13,11 +14,11 @@ class BitcoinUtils:
     # Config file location - handle both Windows and Unix paths
     CONFIG_FILE = os.path.join(os.path.normpath("C:/temp"), "node_settings.txt")
 
-    # Default node settings (will be overridden by config file)
-    NODE_URL = 'localhost'
-    NODE_PORT = '8332'
-    RPC_USER = None
-    RPC_PASS = None
+    # Default node settings (will be overridden by config file or env vars)
+    NODE_URL = os.environ.get('BITCOIN_NODE_URL', 'localhost')
+    NODE_PORT = os.environ.get('BITCOIN_NODE_PORT', '8332')
+    RPC_USER = os.environ.get('BITCOIN_RPC_USER')
+    RPC_PASS = os.environ.get('BITCOIN_RPC_PASS')
     _rpc_connection = None
     _config_loaded = False
 
@@ -73,8 +74,22 @@ class BitcoinUtils:
     def _ensure_config_loaded(cls):
         """Ensure config is loaded before any node operations."""
         if not cls._config_loaded:
+            # Check environment variables first
+            if all([os.environ.get('BITCOIN_NODE_URL'),
+                   os.environ.get('BITCOIN_NODE_PORT'),
+                   os.environ.get('BITCOIN_RPC_USER'),
+                   os.environ.get('BITCOIN_RPC_PASS')]):
+                cls.NODE_URL = os.environ['BITCOIN_NODE_URL']
+                cls.NODE_PORT = os.environ['BITCOIN_NODE_PORT']
+                cls.RPC_USER = os.environ['BITCOIN_RPC_USER']
+                cls.RPC_PASS = os.environ['BITCOIN_RPC_PASS']
+                cls._config_loaded = True
+                logging.info("Using Bitcoin node settings from environment variables")
+                return
+
+            # Fall back to config file if environment variables are not set
             if not cls.load_config():
-                raise ConnectionError("Bitcoin node settings not properly configured. Please check settings file.")
+                raise ConnectionError("Bitcoin node settings not properly configured. Please check settings or environment variables.")
             cls._config_loaded = True
 
     @classmethod
@@ -151,10 +166,10 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
 
         if cls._rpc_connection is None:
             if not all([cls.RPC_USER, cls.RPC_PASS]):
-                raise ValueError("Bitcoin node credentials not configured. Please check settings file.")
+                raise ValueError("Bitcoin node credentials not configured")
 
             rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
-            cls._rpc_connection = AuthServiceProxy(rpc_url)
+            cls._rpc_connection = AuthServiceProxy(rpc_url, timeout=30)
 
         return cls._rpc_connection
 
@@ -189,9 +204,19 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
     @classmethod
     def check_balance(cls, address: str) -> Optional[float]:
         """Check balance of a Bitcoin address using the node."""
-        rpc = cls.get_rpc_connection()
-        balance = rpc.getreceivedbyaddress(address)
-        return float(balance)
+        retry_count = 3
+        for attempt in range(retry_count):
+            try:
+                rpc = cls.get_rpc_connection()
+                balance = rpc.getreceivedbyaddress(address)
+                return float(balance)
+            except Exception as e:
+                logging.warning(f"Balance check attempt {attempt + 1} failed: {str(e)}")
+                cls._rpc_connection = None
+                if attempt < retry_count - 1:
+                    time.sleep(1)
+                    continue
+                raise
 
     @classmethod
     def validate_address(cls, address: str) -> bool:
@@ -203,16 +228,34 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
     @classmethod
     def verify_live_node(cls) -> None:
         """Verify connection to live node or raise error."""
-        try:
-            rpc = cls.get_rpc_connection()
-            blockchain_info = rpc.getblockchaininfo()
+        retry_count = 3
+        last_error = None
 
-            if not blockchain_info:
-                raise ConnectionError("Could not fetch blockchain info from node")
+        for attempt in range(retry_count):
+            try:
+                rpc = cls.get_rpc_connection()
+                blockchain_info = rpc.getblockchaininfo()
 
-        except Exception as e:
-            logging.error(f"Live node verification failed: {str(e)}")
-            raise ConnectionError(f"Live node verification failed: {str(e)}")
+                if not blockchain_info:
+                    raise ConnectionError("Could not fetch blockchain info from node")
+
+                # Reset connection on success to prevent stale connections
+                cls._rpc_connection = None
+                return
+
+            except JSONRPCException as e:
+                last_error = f"RPC Error: {str(e)}"
+                logging.warning(f"Node verification attempt {attempt + 1} failed: {str(e)}")
+                cls._rpc_connection = None
+                time.sleep(2)  # Increased wait time between retries
+            except Exception as e:
+                last_error = str(e)
+                logging.warning(f"Node verification attempt {attempt + 1} failed: {str(e)}")
+                cls._rpc_connection = None
+                time.sleep(2)
+
+        logging.error(f"Live node verification failed after {retry_count} attempts: {last_error}")
+        raise ConnectionError(f"Live node verification failed: {last_error}")
 
     @classmethod
     def verify_wallet(cls, address: str) -> float:

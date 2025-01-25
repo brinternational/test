@@ -308,24 +308,58 @@ class WalletScannerTab(ttk.Frame):
         while True:
             try:
                 if hasattr(self, 'stats_text'):
-                    stats = self.scanner.get_statistics()
-                    stats_text = (
-                        f"Total Scanned: {stats['total_scanned']}\n"
-                        f"CPU Processed: {stats['cpu_processed']}\n"
-                        f"GPU Processed: {stats['gpu_processed']}\n"
-                        f"Found Wallets: {stats['wallets_with_balance']}\n"
-                        f"CPU Scan Rate: {stats['cpu_scan_rate']}/min\n"
-                        f"GPU Scan Rate: {stats['gpu_scan_rate']}/min\n"
-                        f"Queue Size: {stats['queue_size']}\n"
-                        f"Last Updated: {datetime.now().strftime('%H:%M:%S')}"
-                    )
+                    stats = self.get_statistics()
+                    if stats:
+                        stats_text = (
+                            f"=== Node Connection Status ===\n"
+                            f"Network: {stats['node_chain']}\n"
+                            f"Block Height: {stats['node_height']:,}\n"
+                            f"\n=== Scan Statistics ===\n"
+                            f"Total Scanned: {stats['total_scanned']}\n"
+                            f"CPU Processed: {stats['cpu_processed']}\n"
+                            f"GPU Processed: {stats['gpu_processed']}\n"
+                            f"Found Wallets: {stats['wallets_with_balance']}\n"
+                            f"CPU Scan Rate: {stats['cpu_scan_rate']}/min\n"
+                            f"GPU Scan Rate: {stats['gpu_scan_rate']}/min\n"
+                            f"Queue Size: {stats['queue_size']}\n"
+                            f"Last Updated: {datetime.now().strftime('%H:%M:%S')}"
+                        )
 
-                    self.stats_text.delete(1.0, tk.END)
-                    self.stats_text.insert(tk.END, stats_text)
+                        self.stats_text.delete(1.0, tk.END)
+                        self.stats_text.insert(tk.END, stats_text)
             except Exception as e:
                 logging.error(f"Error updating stats in tab {self.tab_id}: {str(e)}")
             finally:
                 threading.Event().wait(1.0)  # Update every second
+
+    def get_statistics(self):
+        """Get current node information."""
+        try:
+            # Verify live node connection
+            BitcoinUtils.verify_live_node()
+            node_info = BitcoinUtils.get_node_info()
+
+            cpu_rate_per_min = self.scanner.cpu_scan_rate * 60
+            gpu_rate_per_min = self.scanner.gpu_scan_rate * 60
+            
+            stats = {
+                'total_scanned': f"{self.scanner.shared_total.value:,}",
+                'cpu_processed': f"{self.scanner.cpu_processed.value:,}",
+                'gpu_processed': f"{self.scanner.gpu_processed.value:,}",
+                'wallets_with_balance': f"{self.scanner.shared_balance_count.value:,}",
+                'cpu_scan_rate': f"{cpu_rate_per_min:,.1f}",
+                'gpu_scan_rate': f"{gpu_rate_per_min:,.1f}",
+                'queue_size': f"{self.scanner.wallet_queue.qsize():,}",
+                'node_chain': node_info['chain'],
+                'node_height': node_info['blocks']
+            }
+            return stats
+
+        except Exception as e:
+            logging.error(f"Instance {self.tab_id}: Failed to get statistics - no live node connection: {str(e)}")
+            self.stop_scanning()  # Stop scanning if we lose node connection
+            raise
+
 
 class BitcoinEducationApp(tk.Tk):
     def __init__(self):
