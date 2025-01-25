@@ -32,6 +32,12 @@ class WalletScanner:
         self._futures = []
         self._lock = threading.Lock()
 
+        # Initialize acceleration settings
+        self.cpu_enabled = True
+        self.gpu_enabled = False  # Default to False since we're focusing on live node verification
+        self.npu_enabled = False
+        self.gpu_hasher = None
+
         self.save_dir = os.path.normpath("C:/temp")
         self._setup_save_directory()
 
