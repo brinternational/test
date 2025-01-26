@@ -19,12 +19,15 @@ logging.basicConfig(
     ]
 )
 
+# Add simulation mode flag
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.bitcoin_utils = BitcoinUtils()
+        self._connection_check_after = None
+        self.simulation_mode = False
         self.setup_ui()
-        self.check_connection()
+        self.start_connection_check()
 
     def setup_ui(self):
         # Configure grid
@@ -145,30 +148,59 @@ class NodeSettingsFrame(ttk.Frame):
             messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
 
     def check_connection(self):
-        """Test connection to Bitcoin node."""
+        """Test connection to Bitcoin node with non-blocking checks."""
         try:
-            self.bitcoin_utils.verify_live_node()
-            node_info = self.bitcoin_utils.get_node_info()
+            success = self.bitcoin_utils.test_connection_async()
+            if success:
+                node_info = self.bitcoin_utils.get_node_info()
+                self.status_indicator.config(foreground="green")
+                self.status_label.config(text="Connected", foreground="green")
 
-            self.status_indicator.config(foreground="green")
-            self.status_label.config(text="Connected", foreground="green")
+                status_text = (
+                    f"Connected to Bitcoin Node\n"
+                    f"Network: {node_info['chain']}\n"
+                    f"Block Height: {node_info['blocks']:,}\n"
+                    f"Connected Peers: {node_info['peers']}"
+                )
 
-            status_text = (
-                f"Connected to Bitcoin Node\n"
-                f"Network: {node_info['chain']}\n"
-                f"Block Height: {node_info['blocks']:,}\n"
-                f"Connected Peers: {node_info['peers']}"
-            )
-
-            self.info_text.delete(1.0, tk.END)
-            self.info_text.insert(tk.END, status_text)
-
+                self.info_text.delete(1.0, tk.END)
+                self.info_text.insert(tk.END, status_text)
+                self.simulation_mode = False
+            else:
+                self.enable_simulation_mode("Node connection failed")
         except Exception as e:
-            self.status_indicator.config(foreground="red")
-            self.status_label.config(text="Error", foreground="red")
-            self.info_text.delete(1.0, tk.END)
-            self.info_text.insert(tk.END, f"Node Error: {str(e)}")
-            raise ConnectionError(f"Bitcoin node connection failed: {str(e)}")
+            self.enable_simulation_mode(str(e))
+
+    def enable_simulation_mode(self, error_msg):
+        """Enable simulation mode with appropriate UI updates."""
+        self.simulation_mode = True
+        self.status_indicator.config(foreground="orange")
+        self.status_label.config(text="Simulation Mode", foreground="orange")
+
+        status_text = (
+            f"Running in Simulation Mode\n"
+            f"Node Error: {error_msg}\n\n"
+            f"The application will run with simulated data.\n"
+            f"Some features may be limited."
+        )
+
+        self.info_text.delete(1.0, tk.END)
+        self.info_text.insert(tk.END, status_text)
+
+    def start_connection_check(self):
+        """Start periodic connection checks in a non-blocking way."""
+        def schedule_check():
+            if hasattr(self, 'status_label'):
+                self.check_connection()
+                self._connection_check_after = self.after(5000, schedule_check)
+
+        schedule_check()
+
+    def on_destroy(self):
+        """Clean up scheduled tasks."""
+        if self._connection_check_after:
+            self.after_cancel(self._connection_check_after)
+
 
 class SummaryTab(ttk.Frame):
     def __init__(self, parent):
@@ -222,6 +254,9 @@ class WalletScannerTab(ttk.Frame):
         super().__init__(parent)
         self.tab_id = tab_id
         self.scanner = WalletScanner()
+        self._stats_update_after_id = None
+        self._is_updating = False
+        self.simulation_mode = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -236,7 +271,7 @@ class WalletScannerTab(ttk.Frame):
         btn_frame = ttk.Frame(status_frame)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        self.start_btn = ttk.Button(btn_frame, text="Start Scanning", command=self.start_scanning)
+        self.start_btn = ttk.Button(btn_frame, text="▶ Start", command=self.toggle_scanning)
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
         self.stop_btn = ttk.Button(btn_frame, text="Stop Scanning", command=self.stop_scanning)
@@ -248,7 +283,7 @@ class WalletScannerTab(ttk.Frame):
         thread_frame.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(thread_frame, text="Threads:").pack(side=tk.LEFT, padx=5)
         self.thread_var = tk.StringVar(value="4")
-        thread_spinbox = ttk.Spinbox(
+        self.thread_spinbox = ttk.Spinbox(
             thread_frame, 
             from_=1, 
             to=16, 
@@ -256,7 +291,7 @@ class WalletScannerTab(ttk.Frame):
             width=5,
             command=self.update_threads
         )
-        thread_spinbox.pack(side=tk.LEFT, padx=5)
+        self.thread_spinbox.pack(side=tk.LEFT, padx=5)
 
         # Statistics Frame
         stats_frame = ttk.LabelFrame(self, text="Statistics")
@@ -265,40 +300,120 @@ class WalletScannerTab(ttk.Frame):
         self.stats_text = tk.Text(stats_frame, height=10, width=50)
         self.stats_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
 
-        # Start statistics update thread
-        self.update_thread = threading.Thread(target=self.update_stats, daemon=True)
-        self.update_thread.start()
+        # Don't start the update thread immediately
+        self.schedule_stats_update()
+
+    def schedule_stats_update(self):
+        """Schedule the next statistics update using tkinter's after()"""
+        if not self._is_updating and hasattr(self, 'stats_text'):
+            self._is_updating = True
+            self.after(1000, self._update_stats)
+
+    def _update_stats(self):
+        """Update statistics in a non-blocking way"""
+        try:
+            stats = self.get_statistics()
+            if stats and hasattr(self, 'stats_text'):
+                stats_text = (
+                    f"=== Node Connection Status ===\n"
+                    f"Network: {stats['node_chain']}\n"
+                    f"Block Height: {stats['node_height']:,}\n"
+                    f"\n=== Scan Statistics ===\n"
+                    f"Total Scanned: {stats['total_scanned']}\n"
+                    f"CPU Processed: {stats['cpu_processed']}\n"
+                    f"GPU Processed: {stats['gpu_processed']}\n"
+                    f"Found Wallets: {stats['wallets_with_balance']}\n"
+                    f"CPU Scan Rate: {stats['cpu_scan_rate']}/min\n"
+                    f"GPU Scan Rate: {stats['gpu_scan_rate']}/min\n"
+                    f"Queue Size: {stats['queue_size']}\n"
+                    f"Last Updated: {datetime.now().strftime('%H:%M:%S')}"
+                )
+
+                self.stats_text.delete(1.0, tk.END)
+                self.stats_text.insert(tk.END, stats_text)
+        except Exception as e:
+            logging.error(f"Error updating stats in tab {self.tab_id}: {str(e)}")
+        finally:
+            self._is_updating = False
+            # Schedule next update if we're still visible
+            if self.winfo_viewable():
+                self.schedule_stats_update()
 
     def update_threads(self):
+        """Update thread count with improved error handling"""
         try:
             threads = int(self.thread_var.get())
+            if threads < 1:
+                raise ValueError("Thread count must be at least 1")
+
+            # Update thread count in a non-blocking way
+            self.after(0, lambda: self._safe_update_threads(threads))
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+            self.thread_var.set("4")  # Reset to default
+
+    def _safe_update_threads(self, threads):
+        """Safely update thread count without blocking the UI"""
+        try:
             self.scanner.set_thread_count(threads)
-        except ValueError:
-            pass
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update thread count: {str(e)}")
+            self.thread_var.set("4")  # Reset to default on error
+
+
+    def toggle_scanning(self):
+        """Toggle wallet scanning with simulation mode support."""
+        try:
+            # Check if we're in simulation mode
+            if hasattr(self.master.master, 'node_settings'):
+                self.simulation_mode = self.master.master.node_settings.simulation_mode
+
+            if not self.simulation_mode:
+                # Try connecting to node before starting
+                success = BitcoinUtils.test_connection_async()
+                if not success:
+                    if messagebox.askyesno(
+                        "Node Connection Failed",
+                        "Bitcoin node connection failed. Would you like to continue in simulation mode?"
+                    ):
+                        self.simulation_mode = True
+                    else:
+                        return
+
+            # Start or stop scanning based on current state
+            if not self.scanner.scanning:
+                self.start_scanning()
+            else:
+                self.stop_scanning()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error toggling scanner: {str(e)}")
 
     def start_scanning(self):
+        """Start wallet scanning with simulation mode support."""
+        if self.scanner.scanning:
+            return
+
         try:
-            self.scanner.start_scan()
-            self.start_btn['state'] = 'disabled'
-            self.stop_btn['state'] = 'normal'
+            self.scanner.start_scan(simulation_mode=self.simulation_mode)
+            self.start_btn.config(text="■ Stop", state='normal')
+            self.thread_spinbox.config(state='disabled')
+            self.schedule_stats_update()
 
-            # Log scanner start time
-            wallet_dir = self.wallet_dir_var.get() if hasattr(self, 'wallet_dir_var') else "C:/temp"
-            os.makedirs(wallet_dir, exist_ok=True)
-            timestamp_file = os.path.join(wallet_dir, "wallets.txt")
-            with open(timestamp_file, 'a') as f:
-                f.write(f"\nScanner started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-            logging.info(f"Scanner started in tab {self.tab_id}")
+            logging.info(f"Scanner started in tab {self.tab_id} (Simulation: {self.simulation_mode})")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start scanner: {str(e)}")
             logging.error(f"Failed to start scanner in tab {self.tab_id}: {str(e)}")
 
     def stop_scanning(self):
+        """Stop wallet scanning."""
+        if not self.scanner.scanning:
+            return
+
         try:
             self.scanner.stop_scan()
-            self.start_btn['state'] = 'normal'
-            self.stop_btn['state'] = 'disabled'
+            self.start_btn.config(text="▶ Start", state='normal')
+            self.thread_spinbox.config(state='normal')
             logging.info(f"Scanner stopped in tab {self.tab_id}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to stop scanner: {str(e)}")
