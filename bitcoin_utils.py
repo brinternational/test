@@ -8,6 +8,9 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import logging
 import time
 import socket
+from threading import Thread, Lock
+from queue import Queue
+from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -22,6 +25,11 @@ class BitcoinUtils:
     RPC_PASS = os.environ.get('BITCOIN_RPC_PASS')
     _rpc_connection = None
     _config_loaded = False
+    _connection_queue = Queue()
+    _async_result = None
+    _instance_lock = Lock()
+    _connection_timeout = 5
+    _rpc_timeout = 30
 
     @classmethod
     def generate_checksum(cls, payload: bytes) -> bytes:
@@ -164,38 +172,44 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
 
     @classmethod
     def get_rpc_connection(cls) -> AuthServiceProxy:
-        """Get or create RPC connection to Bitcoin node with enhanced error handling."""
-        cls._ensure_config_loaded()
+        """Get or create RPC connection to Bitcoin node with improved handling."""
+        with cls._instance_lock:
+            cls._ensure_config_loaded()
 
-        if cls._rpc_connection is None:
-            if not all([cls.RPC_USER, cls.RPC_PASS]):
-                logging.error("Bitcoin node credentials not configured")
-                raise ValueError("Bitcoin node credentials not configured")
+            if cls._rpc_connection is None:
+                if not all([cls.RPC_USER, cls.RPC_PASS]):
+                    logging.error("Bitcoin node credentials not configured")
+                    raise ValueError("Bitcoin node credentials not configured")
 
-            try:
-                rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
-                logging.debug(f"Attempting RPC connection to {cls.NODE_URL}:{cls.NODE_PORT}")
-
-                # Test socket connection first
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
                 try:
-                    sock.connect((cls.NODE_URL, int(cls.NODE_PORT)))
-                    logging.debug("Socket connection successful")
+                    rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
+                    logging.debug(f"Attempting RPC connection to {cls.NODE_URL}:{cls.NODE_PORT}")
+
+                    # Test socket connection first with shorter timeout
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(cls._connection_timeout)
+                    try:
+                        sock.connect((cls.NODE_URL, int(cls.NODE_PORT)))
+                        logging.debug("Socket connection successful")
+                    except Exception as e:
+                        logging.error(f"Socket connection failed: {str(e)}")
+                        raise ConnectionError(f"Cannot connect to Bitcoin node: {str(e)}")
+                    finally:
+                        sock.close()
+
+                    # Create RPC connection with timeout
+                    cls._rpc_connection = AuthServiceProxy(rpc_url, timeout=cls._rpc_timeout)
+
+                    # Test connection with simple command
+                    cls._rpc_connection.getblockcount()
+                    logging.debug("RPC connection established and verified")
+
                 except Exception as e:
-                    logging.error(f"Socket connection failed: {str(e)}")
-                    raise ConnectionError(f"Cannot connect to Bitcoin node: {str(e)}")
-                finally:
-                    sock.close()
+                    cls._rpc_connection = None
+                    logging.error(f"Failed to establish RPC connection: {str(e)}", exc_info=True)
+                    raise
 
-                cls._rpc_connection = AuthServiceProxy(rpc_url, timeout=30)
-                logging.debug("RPC connection established")
-
-            except Exception as e:
-                logging.error(f"Failed to establish RPC connection: {str(e)}", exc_info=True)
-                raise
-
-        return cls._rpc_connection
+            return cls._rpc_connection
 
     @classmethod
     def test_node_connection(cls) -> Tuple[bool, str]:
@@ -323,3 +337,56 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
             'blocks': blockchain_info.get('blocks', 0),
             'peers': rpc.getconnectioncount()
         }
+
+    @classmethod
+    def test_connection_async(cls):
+        """Asynchronously test connection to Bitcoin node."""
+        try:
+            # Clear previous results
+            while not cls._connection_queue.empty():
+                cls._connection_queue.get_nowait()
+
+            def _test_connection():
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2)  # Shorter timeout for initial test
+
+                    try:
+                        logging.debug(f"Testing socket connection to {cls.NODE_URL}:{cls.NODE_PORT}")
+                        sock.connect((cls.NODE_URL, int(cls.NODE_PORT)))
+
+                        # Only report success if we can make a basic RPC call
+                        try:
+                            rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
+                            rpc = AuthServiceProxy(rpc_url, timeout=5)
+                            rpc.getblockcount()
+                            cls._connection_queue.put((True, None))
+                        except Exception as e:
+                            cls._connection_queue.put((False, f"RPC Error: {str(e)}"))
+                    except Exception as e:
+                        cls._connection_queue.put((False, f"Socket Error: {str(e)}"))
+                    finally:
+                        sock.close()
+                except Exception as e:
+                    cls._connection_queue.put((False, str(e)))
+
+            thread = Thread(target=_test_connection, name="NodeConnectionTest", daemon=True)
+            thread.start()
+            return True
+
+        except Exception as e:
+            logging.error(f"Error starting connection test: {str(e)}")
+            return False
+
+    @classmethod
+    def get_connection_status(cls):
+        """Get the result of the last async connection test."""
+        try:
+            if not cls._connection_queue.empty():
+                success, error = cls._connection_queue.get_nowait()
+                if success:
+                    return True, "Connected"
+                return False, error
+            return None, "Test pending"
+        except Exception as e:
+            return False, str(e)

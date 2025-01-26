@@ -6,12 +6,13 @@ import threading
 from datetime import datetime
 from wallet_scanner import WalletScanner
 from typing import Dict
-from bitcoin_utils import BitcoinUtils # Added import for BitcoinUtils
+from bitcoin_utils import BitcoinUtils
 import json
+import socket
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed from INFO to DEBUG
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - [%(threadName)s] %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -19,13 +20,14 @@ logging.basicConfig(
     ]
 )
 
-# Add simulation mode flag
+# NodeSettingsFrame class update
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
         logging.debug("Initializing NodeSettingsFrame")
         super().__init__(parent)
         self.bitcoin_utils = BitcoinUtils()
         self._connection_check_after = None
+        self._check_pending = False
         self.simulation_mode = False
         self.setup_ui()
         self.start_connection_check()
@@ -44,7 +46,7 @@ class NodeSettingsFrame(ttk.Frame):
         status_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.status_indicator = ttk.Label(
-            status_frame, 
+            status_frame,
             text="●",
             font=("Arial", 12),
             foreground="gray"
@@ -151,32 +153,64 @@ class NodeSettingsFrame(ttk.Frame):
 
     def check_connection(self):
         """Test connection to Bitcoin node with non-blocking checks."""
+        if self._check_pending:
+            return
+
         logging.debug("Starting node connection check")
+        self._check_pending = True
+
         try:
-            success = self.bitcoin_utils.test_connection_async()
-            logging.debug(f"Connection test result: {'Success' if success else 'Failed'}")
+            success = BitcoinUtils.test_connection_async()
+            logging.debug(f"Connection test initiated: {success}")
             if success:
-                node_info = self.bitcoin_utils.get_node_info()
-                logging.info(f"Connected to node - Info: {node_info}")
-                self.status_indicator.config(foreground="green")
-                self.status_label.config(text="Connected", foreground="green")
-
-                status_text = (
-                    f"Connected to Bitcoin Node\n"
-                    f"Network: {node_info['chain']}\n"
-                    f"Block Height: {node_info['blocks']:,}\n"
-                    f"Connected Peers: {node_info['peers']}"
-                )
-
-                self.info_text.delete(1.0, tk.END)
-                self.info_text.insert(tk.END, status_text)
-                self.simulation_mode = False
+                # Schedule status check
+                self.after(100, self._check_connection_status)
             else:
-                logging.warning("Node connection failed, enabling simulation mode")
-                self.enable_simulation_mode("Node connection failed")
+                self.enable_simulation_mode("Failed to start connection test")
+                self._check_pending = False
         except Exception as e:
             logging.error(f"Connection check error: {str(e)}", exc_info=True)
             self.enable_simulation_mode(str(e))
+            self._check_pending = False
+
+    def _check_connection_status(self):
+        """Check the result of async connection test."""
+        try:
+            status, error = BitcoinUtils.get_connection_status()
+            if status is None:
+                # Test still pending, check again in 100ms
+                self.after(100, self._check_connection_status)
+                return
+
+            self._check_pending = False
+
+            if status:
+                try:
+                    node_info = self.bitcoin_utils.get_node_info()
+                    logging.info(f"Connected to node - Info: {node_info}")
+                    self.status_indicator.config(foreground="green")
+                    self.status_label.config(text="Connected", foreground="green")
+
+                    status_text = (
+                        f"Connected to Bitcoin Node\n"
+                        f"Network: {node_info['chain']}\n"
+                        f"Block Height: {node_info['blocks']:,}\n"
+                        f"Connected Peers: {node_info['peers']}"
+                    )
+
+                    self.info_text.delete(1.0, tk.END)
+                    self.info_text.insert(tk.END, status_text)
+                    self.simulation_mode = False
+                except Exception as e:
+                    logging.error(f"Error getting node info: {str(e)}", exc_info=True)
+                    self.enable_simulation_mode(str(e))
+            else:
+                logging.warning(f"Node connection failed: {error}")
+                self.enable_simulation_mode(error)
+        except Exception as e:
+            logging.error(f"Error checking connection status: {str(e)}", exc_info=True)
+            self.enable_simulation_mode(str(e))
+            self._check_pending = False
 
     def enable_simulation_mode(self, error_msg):
         """Enable simulation mode with appropriate UI updates."""
@@ -291,9 +325,9 @@ class WalletScannerTab(ttk.Frame):
         ttk.Label(thread_frame, text="Threads:").pack(side=tk.LEFT, padx=5)
         self.thread_var = tk.StringVar(value="4")
         self.thread_spinbox = ttk.Spinbox(
-            thread_frame, 
-            from_=1, 
-            to=16, 
+            thread_frame,
+            from_=1,
+            to=16,
             textvariable=self.thread_var,
             width=5,
             command=self.update_threads
@@ -463,7 +497,7 @@ class WalletScannerTab(ttk.Frame):
 
             cpu_rate_per_min = self.scanner.cpu_scan_rate * 60
             gpu_rate_per_min = self.scanner.gpu_scan_rate * 60
-            
+
             stats = {
                 'total_scanned': f"{self.scanner.shared_total.value:,}",
                 'cpu_processed': f"{self.scanner.cpu_processed.value:,}",
@@ -532,7 +566,7 @@ class BitcoinEducationApp(tk.Tk):
         status_frame.pack(fill=tk.X, pady=(0, 5))
 
         self.connection_indicator = ttk.Label(
-            status_frame, 
+            status_frame,
             text="●",
             font=("Arial", 12),
             foreground="gray"
@@ -634,7 +668,7 @@ class BitcoinEducationApp(tk.Tk):
 
     def remove_current_tab(self):
         current_tab = self.notebook.select()
-        if not current_tab or str(current_tab) == str(self.summary_tab) or str(current_tab) == str(self.node_settings): #Added node_settings check
+        if not current_tab or str(current_tab) == str(self.summary_tab) or str(current_tab) == str(self.node_settings):
             return
 
         tab_id = None
