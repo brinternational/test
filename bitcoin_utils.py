@@ -217,12 +217,18 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
     def test_node_connection(cls) -> Tuple[bool, str]:
         """Test connection to Bitcoin node."""
         try:
+            logging.debug("Starting node connection test")
             rpc = cls.get_rpc_connection()
             blockchain_info = rpc.getblockchaininfo()
+            logging.debug("Got blockchain info")
 
             network = blockchain_info.get('chain', 'unknown')
             blocks = blockchain_info.get('blocks', 0)
             peers = rpc.getconnectioncount()
+            logging.debug(f"Got connection count: {peers}")
+
+            # Add end marker
+            logging.debug("Finished node connection test")
 
             return True, (
                 f"Connected to Bitcoin node\n"
@@ -239,6 +245,7 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
             else:
                 message = f"Connection error: {error_message}"
 
+            logging.error(f"Node connection test failed: {message}")
             raise ConnectionError(message)
 
     @classmethod
@@ -329,15 +336,27 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
     @classmethod
     def get_node_info(cls) -> Dict:
         """Get current node information."""
+        logging.debug("Starting get_node_info")
         cls.verify_live_node()  # Will raise error if node isn't accessible
+        logging.debug("Live node verified")
 
         rpc = cls.get_rpc_connection()
+        logging.debug("Got RPC connection")
+
         blockchain_info = rpc.getblockchaininfo()
+        logging.debug(f"Got blockchain info: {blockchain_info.get('chain', 'unknown')}")
+
+        peers = rpc.getconnectioncount()
+        logging.debug(f"Got connection count: {peers}")
+
+        # Add a clear end marker
+        logging.debug("Finished collecting node info")
 
         return {
             'chain': blockchain_info.get('chain', 'unknown'),
             'blocks': blockchain_info.get('blocks', 0),
-            'peers': rpc.getconnectioncount()
+            'peers': peers,
+            'progress': f"{blockchain_info.get('verificationprogress', 0)*100:.2f}%"
         }
 
     @classmethod

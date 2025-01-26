@@ -253,7 +253,7 @@ class NodeSettingsFrame(ttk.Frame):
                 self.check_connection()
                 # Schedule next check using class interval
                 self._connection_check_after = self.after(
-                    self._check_interval, 
+                    self._check_interval,
                     schedule_check
                 )
 
@@ -313,6 +313,7 @@ class SummaryTab(ttk.Frame):
                 logging.error(f"Error updating summary stats: {str(e)}")
             finally:
                 threading.Event().wait(1.0)
+
 
 class WalletScannerTab(ttk.Frame):
     def __init__(self, parent, tab_id: str):
@@ -507,12 +508,26 @@ class WalletScannerTab(ttk.Frame):
     def get_statistics(self):
         """Get current node information."""
         try:
-            # Verify live node connection
+            # Add timeout handling for node info collection
+            start_time = time.time()
+            timeout = 5  # 5 second timeout
+
+            # Verify live node connection with timeout
             BitcoinUtils.verify_live_node()
+            logging.debug("Live node verification successful")
+
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Node info collection timed out")
+
             node_info = BitcoinUtils.get_node_info()
+            logging.debug(f"Retrieved node info successfully: {node_info}")
+
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Node info collection timed out")
 
             cpu_rate_per_min = self.scanner.cpu_scan_rate * 60
             gpu_rate_per_min = self.scanner.gpu_scan_rate * 60
+            logging.debug("Calculated scan rates")
 
             stats = {
                 'total_scanned': f"{self.scanner.shared_total.value:,}",
@@ -525,12 +540,18 @@ class WalletScannerTab(ttk.Frame):
                 'node_chain': node_info['chain'],
                 'node_height': node_info['blocks']
             }
+            logging.debug("Statistics compilation complete")
             return stats
 
+        except TimeoutError as e:
+            logging.error(f"Instance {self.tab_id}: Statistics collection timed out: {str(e)}")
+            self.stop_scanning()
+            raise
         except Exception as e:
             logging.error(f"Instance {self.tab_id}: Failed to get statistics - no live node connection: {str(e)}")
             self.stop_scanning()  # Stop scanning if we lose node connection
             raise
+
 
 
 class BitcoinEducationApp(tk.Tk):
