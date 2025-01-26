@@ -36,6 +36,9 @@ class WalletScanner:
         self._process_pool = None
         self._futures = []
         self._lock = threading.Lock()
+        self._stats_lock = threading.Lock()
+        self._stats_thread = None
+        self._stats_stop_event = threading.Event()
 
         # Initialize acceleration settings
         self.cpu_enabled = True
@@ -63,6 +66,21 @@ class WalletScanner:
         self.last_cpu_time = time.time()
         self.last_gpu_time = time.time()
 
+        # Add cached stats to prevent blocking
+        self._cached_stats = {
+            'total_scanned': "0",
+            'cpu_processed': "0",
+            'gpu_processed': "0",
+            'wallets_with_balance': "0",
+            'cpu_scan_rate': "0.0",
+            'gpu_scan_rate': "0.0",
+            'queue_size': "0",
+            'node_chain': 'unknown',
+            'node_height': 0
+        }
+        self._last_stats_update = 0
+        self._stats_update_interval = 1.0  # Update every second
+
     def verify_wallet(self, address: str) -> float:
         """Verify wallet balance either through node or simulation."""
         if self.simulation_mode:
@@ -85,91 +103,79 @@ class WalletScanner:
         return BitcoinUtils.get_node_info()
 
     def start_scan(self, simulation_mode: bool = False):
-        """Start wallet scanning with simulation mode support."""
+        """Start wallet scanning with non-blocking initialization."""
+        if self.scanning:
+            return
+
         try:
             with self._lock:
-                if not self.scanning:
-                    logging.debug(f"Instance {self.instance_id}: Starting scan initialization")
-                    self.simulation_mode = simulation_mode
-                    if not simulation_mode:
-                        try:
-                            logging.debug(f"Instance {self.instance_id}: Verifying live node connection")
+                logging.debug(f"Instance {self.instance_id}: Starting scan initialization")
+                self.simulation_mode = simulation_mode
+
+                def init_scanner():
+                    try:
+                        if not simulation_mode:
                             BitcoinUtils.verify_live_node()
                             logging.info(f"Instance {self.instance_id}: Connected to Bitcoin node")
-                        except Exception as e:
-                            logging.error(f"Instance {self.instance_id}: Failed to connect to Bitcoin node: {str(e)}")
-                            raise
 
-                    self.scanning = True
-                    self.start_time = time.time()
+                        self.scanning = True
+                        self.start_time = time.time()
 
-                    # Reset statistics
-                    logging.debug(f"Instance {self.instance_id}: Resetting scan statistics")
-                    self.cpu_scan_rates.clear()
-                    self.gpu_scan_rates.clear()
-                    self.scan_rates.clear()
+                        # Reset statistics
+                        self._reset_statistics()
+                        self._cleanup_executors()
+                        self._set_process_priority()
 
-                    with self.shared_total.get_lock():
-                        self.shared_total.value = 0
-                    with self.shared_balance_count.get_lock():
-                        self.shared_balance_count.value = 0
-                    with self.cpu_processed.get_lock():
-                        self.cpu_processed.value = 0
-                    with self.gpu_processed.get_lock():
-                        self.gpu_processed.value = 0
+                        # Configure thread pools
+                        executor_workers = self.cpu_thread_count * 2 if os.name == 'nt' else self.cpu_thread_count
 
-                    self._cleanup_executors()
-                    self._set_process_priority()
+                        self._executor = ThreadPoolExecutor(
+                            max_workers=executor_workers,
+                            thread_name_prefix=f"WalletScanner-{self.instance_id}"
+                        )
 
-                    # Configure thread pools
-                    logging.debug(f"Instance {self.instance_id}: Configuring thread pools")
-                    executor_workers = self.cpu_thread_count * 2 if os.name == 'nt' else self.cpu_thread_count
-                    logging.info(f"Instance {self.instance_id}: Using {executor_workers} worker threads")
+                        self._process_pool = ProcessPoolExecutor(
+                            max_workers=self.cpu_thread_count,
+                            mp_context=multiprocessing.get_context('spawn'),
+                            initializer=self._process_initializer
+                        )
 
-                    self._executor = ThreadPoolExecutor(
-                        max_workers=executor_workers,
-                        thread_name_prefix=f"WalletScanner-{self.instance_id}"
-                    )
+                        # Start workers
+                        gen_future = self._executor.submit(self._wallet_generator_worker)
+                        self._futures = [gen_future]
 
-                    logging.debug(f"Instance {self.instance_id}: Creating process pool with {self.cpu_thread_count} workers")
-                    self._process_pool = ProcessPoolExecutor(
-                        max_workers=self.cpu_thread_count,
-                        mp_context=multiprocessing.get_context('spawn'),
-                        initializer=self._process_initializer
-                    )
+                        for _ in range(executor_workers):
+                            scan_future = self._executor.submit(self._scan_worker)
+                            self._futures.append(scan_future)
 
-                    # Start workers
-                    logging.debug(f"Instance {self.instance_id}: Starting worker threads")
-                    gen_future = self._executor.submit(self._wallet_generator_worker)
-                    self._futures = [gen_future]
-
-                    for i in range(executor_workers):
-                        logging.debug(f"Instance {self.instance_id}: Starting worker thread {i+1}/{executor_workers}")
-                        scan_future = self._executor.submit(self._scan_worker)
-                        self._futures.append(scan_future)
-
-                    if self.gpu_enabled and self.gpu_hasher:
-                        try:
-                            logging.debug(f"Instance {self.instance_id}: Starting GPU worker")
+                        if self.gpu_enabled and self.gpu_hasher:
                             gpu_future = self._executor.submit(self._gpu_scan_worker)
                             self._futures.append(gpu_future)
-                            logging.info(f"Instance {self.instance_id}: GPU scanning enabled")
-                        except Exception as e:
-                            logging.warning(f"Instance {self.instance_id}: Failed to start GPU scanner: {str(e)}")
-                            self.gpu_enabled = False
 
-                    logging.info(f"Instance {self.instance_id}: Scan initialization complete")
+                        logging.info(f"Instance {self.instance_id}: Scan initialization complete")
+
+                    except Exception as e:
+                        logging.error(f"Instance {self.instance_id}: Error in scanner initialization: {str(e)}")
+                        self.stop_scan()
+
+                # Run initialization in separate thread
+                threading.Thread(target=init_scanner, daemon=True).start()
 
         except Exception as e:
-            logging.error(f"Instance {self.instance_id}: Error starting scan: {str(e)}", exc_info=True)
+            logging.error(f"Instance {self.instance_id}: Error starting scan: {str(e)}")
             self.scanning = False
-            self._cleanup_executors()
             raise
 
     def get_statistics(self):
-        """Get current statistics with simulation mode support."""
-        with self._lock:
-            try:
+        """Get current statistics with non-blocking behavior."""
+        current_time = time.time()
+
+        # Return cached stats if not enough time has passed
+        if current_time - self._last_stats_update < self._stats_update_interval:
+            return self._cached_stats
+
+        try:
+            with self._stats_lock:
                 # Get node info based on mode
                 if self.simulation_mode:
                     node_info = {
@@ -177,7 +183,11 @@ class WalletScanner:
                         'blocks': 0
                     }
                 else:
-                    node_info = BitcoinUtils.get_node_info()
+                    try:
+                        node_info = BitcoinUtils.get_node_info()
+                    except Exception as e:
+                        logging.warning(f"Failed to get node info: {str(e)}")
+                        node_info = {'chain': 'unknown', 'blocks': 0}
 
                 cpu_rate = self.cpu_scan_rate
                 cpu_rate_per_min = cpu_rate * 60 if cpu_rate > 0 else 0
@@ -185,7 +195,7 @@ class WalletScanner:
                 gpu_rate = self.gpu_scan_rate
                 gpu_rate_per_min = gpu_rate * 60 if gpu_rate > 0 else 0
 
-                return {
+                self._cached_stats = {
                     'total_scanned': f"{self.shared_total.value:,}",
                     'cpu_processed': f"{self.cpu_processed.value:,}",
                     'gpu_processed': f"{self.gpu_processed.value:,}",
@@ -196,22 +206,13 @@ class WalletScanner:
                     'node_chain': node_info['chain'],
                     'node_height': node_info['blocks']
                 }
-            except Exception as e:
-                if not self.simulation_mode:
-                    logging.error(f"Instance {self.instance_id}: Failed to get statistics - no live node connection: {str(e)}")
-                    self.stop_scan()  # Stop scanning if we lose node connection and not in simulation mode
-                    raise
-                return {
-                    'total_scanned': "0",
-                    'cpu_processed': "0",
-                    'gpu_processed': "0",
-                    'wallets_with_balance': "0",
-                    'cpu_scan_rate': "0.0",
-                    'gpu_scan_rate': "0.0",
-                    'queue_size': "0",
-                    'node_chain': 'simulated',
-                    'node_height': 0
-                }
+                self._last_stats_update = current_time
+
+        except Exception as e:
+            logging.error(f"Error updating statistics: {str(e)}")
+            # Return last known good stats on error
+
+        return self._cached_stats
 
     def _setup_save_directory(self):
         try:
@@ -531,3 +532,31 @@ class WalletScanner:
         except Exception as e:
             logging.warning(f"Instance {self.instance_id}: Hardware acceleration disabled: {str(e)}")
             self.gpu_hasher = None
+
+    def _reset_statistics(self):
+        """Reset all statistics counters."""
+        with self._stats_lock:
+            self.cpu_scan_rates.clear()
+            self.gpu_scan_rates.clear()
+            self.scan_rates.clear()
+
+            with self.shared_total.get_lock():
+                self.shared_total.value = 0
+            with self.shared_balance_count.get_lock():
+                self.shared_balance_count.value = 0
+            with self.cpu_processed.get_lock():
+                self.cpu_processed.value = 0
+            with self.gpu_processed.get_lock():
+                self.gpu_processed.value = 0
+
+            self._cached_stats = {
+                'total_scanned': "0",
+                'cpu_processed': "0",
+                'gpu_processed': "0",
+                'wallets_with_balance': "0",
+                'cpu_scan_rate': "0.0",
+                'gpu_scan_rate': "0.0",
+                'queue_size': "0",
+                'node_chain': 'unknown',
+                'node_height': 0
+            }

@@ -292,7 +292,6 @@ class NodeSettingsFrame(ttk.Frame):
         self._check_pending = False  # Ensure no pending checks remain
 
 
-
 class SummaryTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
@@ -403,8 +402,11 @@ class WalletScannerTab(ttk.Frame):
     def _update_stats(self):
         """Update statistics in a non-blocking way"""
         try:
-            stats = self.get_statistics()
-            if stats and hasattr(self, 'stats_text'):
+            if not hasattr(self, 'stats_text'):
+                return
+
+            stats = self.scanner.get_statistics()  # Now using cached stats
+            if stats:
                 stats_text = (
                     f"=== Node Connection Status ===\n"
                     f"Network: {stats['node_chain']}\n"
@@ -422,6 +424,7 @@ class WalletScannerTab(ttk.Frame):
 
                 self.stats_text.delete(1.0, tk.END)
                 self.stats_text.insert(tk.END, stats_text)
+
         except Exception as e:
             logging.error(f"Error updating stats in tab {self.tab_id}: {str(e)}")
         finally:
@@ -454,29 +457,18 @@ class WalletScannerTab(ttk.Frame):
 
     def toggle_scanning(self):
         """Toggle wallet scanning."""
-        try:
-            if not BitcoinUtils.test_connection_async():
-                messagebox.showerror(
-                    "Node Connection Failed",
-                    "Bitcoin node connection failed. Please check your connection settings."
-                )
-                return
-
-            # Start or stop scanning based on current state
-            if not self.scanner.scanning:
-                self.start_scanning()
-            else:
-                self.stop_scanning()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Error toggling scanner: {str(e)}")
+        if not self.scanner.scanning:
+            self.start_scanning()
+        else:
+            self.stop_scanning()
 
     def start_scanning(self):
-        """Start wallet scanning with simulation mode support."""
+        """Start wallet scanning with improved error handling."""
         if self.scanner.scanning:
             return
 
         try:
+            # Start scanner in non-blocking way
             self.scanner.start_scan()
             self.start_btn.config(text="■ Stop", state='normal')
             self.stop_btn.config(state='normal')
@@ -489,7 +481,7 @@ class WalletScannerTab(ttk.Frame):
             logging.error(f"Failed to start scanner in tab {self.tab_id}: {str(e)}")
 
     def stop_scanning(self):
-        """Stop wallet scanning."""
+        """Stop wallet scanning with proper cleanup."""
         if not self.scanner.scanning:
             return
 
@@ -498,38 +490,14 @@ class WalletScannerTab(ttk.Frame):
             self.start_btn.config(text="▶ Start", state='normal')
             self.stop_btn.config(state='disabled')
             self.thread_spinbox.config(state='normal')
+
+            # Cancel any pending stats updates
+            self._is_updating = False
+
             logging.info(f"Scanner stopped in tab {self.tab_id}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to stop scanner: {str(e)}")
             logging.error(f"Failed to stop scanner in tab {self.tab_id}: {str(e)}")
-
-    def update_stats(self):
-        while True:
-            try:
-                if hasattr(self, 'stats_text'):
-                    stats = self.get_statistics()
-                    if stats:
-                        stats_text = (
-                            f"=== Node Connection Status ===\n"
-                            f"Network: {stats['node_chain']}\n"
-                            f"Block Height: {stats['node_height']:,}\n"
-                            f"\n=== Scan Statistics ===\n"
-                            f"Total Scanned: {stats['total_scanned']}\n"
-                            f"CPU Processed: {stats['cpu_processed']}\n"
-                            f"GPU Processed: {stats['gpu_processed']}\n"
-                            f"Found Wallets: {stats['wallets_with_balance']}\n"
-                            f"CPU Scan Rate: {stats['cpu_scan_rate']}/min\n"
-                            f"GPU Scan Rate: {stats['gpu_scan_rate']}/min\n"
-                            f"Queue Size: {stats['queue_size']}\n"
-                            f"Last Updated: {datetime.now().strftime('%H:%M:%S')}"
-                        )
-
-                        self.stats_text.delete(1.0, tk.END)
-                        self.stats_text.insert(tk.END, stats_text)
-            except Exception as e:
-                logging.error(f"Error updating stats in tab {self.tab_id}: {str(e)}")
-            finally:
-                threading.Event().wait(1.0)  # Update every second
 
     def get_statistics(self):
         """Get current node information."""
