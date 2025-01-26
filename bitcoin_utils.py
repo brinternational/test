@@ -7,8 +7,9 @@ import base58
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import logging
 import time
+import socket
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class BitcoinUtils:
     # Config file location - handle both Windows and Unix paths
@@ -74,6 +75,7 @@ class BitcoinUtils:
     def _ensure_config_loaded(cls):
         """Ensure config is loaded before any node operations."""
         if not cls._config_loaded:
+            logging.debug("Loading Bitcoin node configuration...")
             # Check environment variables first
             if all([os.environ.get('BITCOIN_NODE_URL'),
                    os.environ.get('BITCOIN_NODE_PORT'),
@@ -85,6 +87,7 @@ class BitcoinUtils:
                 cls.RPC_PASS = os.environ['BITCOIN_RPC_PASS']
                 cls._config_loaded = True
                 logging.info("Using Bitcoin node settings from environment variables")
+                logging.debug(f"Node URL: {cls.NODE_URL}:{cls.NODE_PORT}")
                 return
 
             # Fall back to config file if environment variables are not set
@@ -161,15 +164,36 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
 
     @classmethod
     def get_rpc_connection(cls) -> AuthServiceProxy:
-        """Get or create RPC connection to Bitcoin node."""
+        """Get or create RPC connection to Bitcoin node with enhanced error handling."""
         cls._ensure_config_loaded()
 
         if cls._rpc_connection is None:
             if not all([cls.RPC_USER, cls.RPC_PASS]):
+                logging.error("Bitcoin node credentials not configured")
                 raise ValueError("Bitcoin node credentials not configured")
 
-            rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
-            cls._rpc_connection = AuthServiceProxy(rpc_url, timeout=30)
+            try:
+                rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
+                logging.debug(f"Attempting RPC connection to {cls.NODE_URL}:{cls.NODE_PORT}")
+
+                # Test socket connection first
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                try:
+                    sock.connect((cls.NODE_URL, int(cls.NODE_PORT)))
+                    logging.debug("Socket connection successful")
+                except Exception as e:
+                    logging.error(f"Socket connection failed: {str(e)}")
+                    raise ConnectionError(f"Cannot connect to Bitcoin node: {str(e)}")
+                finally:
+                    sock.close()
+
+                cls._rpc_connection = AuthServiceProxy(rpc_url, timeout=30)
+                logging.debug("RPC connection established")
+
+            except Exception as e:
+                logging.error(f"Failed to establish RPC connection: {str(e)}", exc_info=True)
+                raise
 
         return cls._rpc_connection
 
@@ -227,32 +251,47 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
 
     @classmethod
     def verify_live_node(cls) -> None:
-        """Verify connection to live node or raise error."""
+        """Verify connection to live node with enhanced error handling."""
         retry_count = 3
         last_error = None
+        logging.debug(f"Verifying live node connection (max {retry_count} attempts)")
 
         for attempt in range(retry_count):
             try:
+                logging.debug(f"Verification attempt {attempt + 1}/{retry_count}")
                 rpc = cls.get_rpc_connection()
+
+                # Try basic command first
+                logging.debug("Testing basic RPC command")
+                network_info = rpc.getnetworkinfo()
+                logging.debug(f"Network info received: version {network_info.get('version', 'unknown')}")
+
+                # Then get blockchain info
                 blockchain_info = rpc.getblockchaininfo()
+                logging.debug(f"Blockchain info received: chain {blockchain_info.get('chain', 'unknown')}")
 
                 if not blockchain_info:
                     raise ConnectionError("Could not fetch blockchain info from node")
 
                 # Reset connection on success to prevent stale connections
                 cls._rpc_connection = None
+                logging.info("Live node verification successful")
                 return
 
             except JSONRPCException as e:
                 last_error = f"RPC Error: {str(e)}"
                 logging.warning(f"Node verification attempt {attempt + 1} failed: {str(e)}")
                 cls._rpc_connection = None
-                time.sleep(2)  # Increased wait time between retries
+                if attempt < retry_count - 1:
+                    logging.debug(f"Waiting 2 seconds before retry {attempt + 2}")
+                    time.sleep(2)
             except Exception as e:
                 last_error = str(e)
-                logging.warning(f"Node verification attempt {attempt + 1} failed: {str(e)}")
+                logging.warning(f"Node verification attempt {attempt + 1} failed: {str(e)}", exc_info=True)
                 cls._rpc_connection = None
-                time.sleep(2)
+                if attempt < retry_count - 1:
+                    logging.debug(f"Waiting 2 seconds before retry {attempt + 2}")
+                    time.sleep(2)
 
         logging.error(f"Live node verification failed after {retry_count} attempts: {last_error}")
         raise ConnectionError(f"Live node verification failed: {last_error}")

@@ -89,9 +89,11 @@ class WalletScanner:
         try:
             with self._lock:
                 if not self.scanning:
+                    logging.debug(f"Instance {self.instance_id}: Starting scan initialization")
                     self.simulation_mode = simulation_mode
                     if not simulation_mode:
                         try:
+                            logging.debug(f"Instance {self.instance_id}: Verifying live node connection")
                             BitcoinUtils.verify_live_node()
                             logging.info(f"Instance {self.instance_id}: Connected to Bitcoin node")
                         except Exception as e:
@@ -102,6 +104,7 @@ class WalletScanner:
                     self.start_time = time.time()
 
                     # Reset statistics
+                    logging.debug(f"Instance {self.instance_id}: Resetting scan statistics")
                     self.cpu_scan_rates.clear()
                     self.gpu_scan_rates.clear()
                     self.scan_rates.clear()
@@ -119,8 +122,16 @@ class WalletScanner:
                     self._set_process_priority()
 
                     # Configure thread pools
+                    logging.debug(f"Instance {self.instance_id}: Configuring thread pools")
                     executor_workers = self.cpu_thread_count * 2 if os.name == 'nt' else self.cpu_thread_count
-                    self._executor = ThreadPoolExecutor(max_workers=executor_workers)
+                    logging.info(f"Instance {self.instance_id}: Using {executor_workers} worker threads")
+
+                    self._executor = ThreadPoolExecutor(
+                        max_workers=executor_workers,
+                        thread_name_prefix=f"WalletScanner-{self.instance_id}"
+                    )
+
+                    logging.debug(f"Instance {self.instance_id}: Creating process pool with {self.cpu_thread_count} workers")
                     self._process_pool = ProcessPoolExecutor(
                         max_workers=self.cpu_thread_count,
                         mp_context=multiprocessing.get_context('spawn'),
@@ -128,15 +139,18 @@ class WalletScanner:
                     )
 
                     # Start workers
+                    logging.debug(f"Instance {self.instance_id}: Starting worker threads")
                     gen_future = self._executor.submit(self._wallet_generator_worker)
                     self._futures = [gen_future]
 
-                    for _ in range(executor_workers):
+                    for i in range(executor_workers):
+                        logging.debug(f"Instance {self.instance_id}: Starting worker thread {i+1}/{executor_workers}")
                         scan_future = self._executor.submit(self._scan_worker)
                         self._futures.append(scan_future)
 
                     if self.gpu_enabled and self.gpu_hasher:
                         try:
+                            logging.debug(f"Instance {self.instance_id}: Starting GPU worker")
                             gpu_future = self._executor.submit(self._gpu_scan_worker)
                             self._futures.append(gpu_future)
                             logging.info(f"Instance {self.instance_id}: GPU scanning enabled")
@@ -144,8 +158,10 @@ class WalletScanner:
                             logging.warning(f"Instance {self.instance_id}: Failed to start GPU scanner: {str(e)}")
                             self.gpu_enabled = False
 
+                    logging.info(f"Instance {self.instance_id}: Scan initialization complete")
+
         except Exception as e:
-            logging.error(f"Instance {self.instance_id}: Error starting scan: {str(e)}")
+            logging.error(f"Instance {self.instance_id}: Error starting scan: {str(e)}", exc_info=True)
             self.scanning = False
             self._cleanup_executors()
             raise
@@ -307,12 +323,12 @@ class WalletScanner:
                         results.append(wallet_data)
                         logging.info(f"Instance {self.instance_id}: Found wallet with balance: {balance} BTC")
                 except Exception as e:
-                    logging.error(f"Instance {self.instance_id}: Error verifying wallet: {str(e)}")
+                    logging.error(f"Instance {self.instance_id}: Error verifying wallet: {str(e)}", exc_info=True)
                     raise  # Fail entire batch if we can't verify wallets
 
             return results
         except Exception as e:
-            logging.error(f"Instance {self.instance_id}: Batch processing failed - no live node connection: {str(e)}")
+            logging.error(f"Instance {self.instance_id}: Batch processing failed - no live node connection: {str(e)}", exc_info=True)
             self.stop_scan()  # Stop scanning if we lose node connection
             raise
 
@@ -346,7 +362,7 @@ class WalletScanner:
                 else:
                     time.sleep(0.0001)
             except Exception as e:
-                logging.error(f"Instance {self.instance_id}: Generator worker error: {str(e)}")
+                logging.error(f"Instance {self.instance_id}: Generator worker error: {str(e)}", exc_info=True)
                 continue
 
     @staticmethod
@@ -403,7 +419,7 @@ class WalletScanner:
             except Empty:
                 time.sleep(0.0001)
             except Exception as e:
-                logging.error(f"Instance {self.instance_id}: CPU Scanner worker error: {str(e)}")
+                logging.error(f"Instance {self.instance_id}: CPU Scanner worker error: {str(e)}", exc_info=True)
                 continue
 
     def _gpu_scan_worker(self):
@@ -430,7 +446,7 @@ class WalletScanner:
             except Empty:
                 time.sleep(0.0001)
             except Exception as e:
-                logging.error(f"Instance {self.instance_id}: GPU Scanner worker error: {str(e)}")
+                logging.error(f"Instance {self.instance_id}: GPU Scanner worker error: {str(e)}", exc_info=True)
                 continue
 
 
@@ -444,12 +460,26 @@ class WalletScanner:
                 logging.info(f"Instance {self.instance_id}: Scan stopped")
 
     def _cleanup_executors(self):
+        """Cleanup thread and process pools with proper logging."""
+        logging.debug(f"Instance {self.instance_id}: Starting executor cleanup")
         if self._executor:
-            self._executor.shutdown(wait=False)
-            self._executor = None
+            try:
+                logging.debug(f"Instance {self.instance_id}: Shutting down thread executor")
+                self._executor.shutdown(wait=False)
+            except Exception as e:
+                logging.error(f"Instance {self.instance_id}: Error shutting down thread executor: {str(e)}", exc_info=True)
+            finally:
+                self._executor = None
+
         if self._process_pool:
-            self._process_pool.shutdown(wait=False)
-            self._process_pool = None
+            try:
+                logging.debug(f"Instance {self.instance_id}: Shutting down process pool")
+                self._process_pool.shutdown(wait=False)
+            except Exception as e:
+                logging.error(f"Instance {self.instance_id}: Error shutting down process pool: {str(e)}", exc_info=True)
+            finally:
+                self._process_pool = None
+        logging.debug(f"Instance {self.instance_id}: Executor cleanup complete")
 
     @property
     def cpu_scan_rate(self):

@@ -11,8 +11,8 @@ import json
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG,  # Changed from INFO to DEBUG
+    format='%(asctime)s - %(levelname)s - [%(threadName)s] %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler('bitcoin_wallet.log')
@@ -22,12 +22,14 @@ logging.basicConfig(
 # Add simulation mode flag
 class NodeSettingsFrame(ttk.Frame):
     def __init__(self, parent):
+        logging.debug("Initializing NodeSettingsFrame")
         super().__init__(parent)
         self.bitcoin_utils = BitcoinUtils()
         self._connection_check_after = None
         self.simulation_mode = False
         self.setup_ui()
         self.start_connection_check()
+        logging.debug("NodeSettingsFrame initialization complete")
 
     def setup_ui(self):
         # Configure grid
@@ -149,10 +151,13 @@ class NodeSettingsFrame(ttk.Frame):
 
     def check_connection(self):
         """Test connection to Bitcoin node with non-blocking checks."""
+        logging.debug("Starting node connection check")
         try:
             success = self.bitcoin_utils.test_connection_async()
+            logging.debug(f"Connection test result: {'Success' if success else 'Failed'}")
             if success:
                 node_info = self.bitcoin_utils.get_node_info()
+                logging.info(f"Connected to node - Info: {node_info}")
                 self.status_indicator.config(foreground="green")
                 self.status_label.config(text="Connected", foreground="green")
 
@@ -167,8 +172,10 @@ class NodeSettingsFrame(ttk.Frame):
                 self.info_text.insert(tk.END, status_text)
                 self.simulation_mode = False
             else:
+                logging.warning("Node connection failed, enabling simulation mode")
                 self.enable_simulation_mode("Node connection failed")
         except Exception as e:
+            logging.error(f"Connection check error: {str(e)}", exc_info=True)
             self.enable_simulation_mode(str(e))
 
     def enable_simulation_mode(self, error_msg):
