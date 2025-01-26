@@ -335,29 +335,54 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
 
     @classmethod
     def get_node_info(cls) -> Dict:
-        """Get current node information."""
+        """Get current node information with improved error handling and timeouts."""
         logging.debug("Starting get_node_info")
-        cls.verify_live_node()  # Will raise error if node isn't accessible
-        logging.debug("Live node verified")
+        try:
+            start_time = time.time()
+            timeout = 5  # 5 second timeout
 
-        rpc = cls.get_rpc_connection()
-        logging.debug("Got RPC connection")
+            # Will raise error if node isn't accessible
+            cls.verify_live_node()
+            logging.debug("Live node verified")
 
-        blockchain_info = rpc.getblockchaininfo()
-        logging.debug(f"Got blockchain info: {blockchain_info.get('chain', 'unknown')}")
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Node info collection timed out during verification")
 
-        peers = rpc.getconnectioncount()
-        logging.debug(f"Got connection count: {peers}")
+            rpc = cls.get_rpc_connection()
+            logging.debug("Got RPC connection")
 
-        # Add a clear end marker
-        logging.debug("Finished collecting node info")
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Node info collection timed out getting RPC connection")
 
-        return {
-            'chain': blockchain_info.get('chain', 'unknown'),
-            'blocks': blockchain_info.get('blocks', 0),
-            'peers': peers,
-            'progress': f"{blockchain_info.get('verificationprogress', 0)*100:.2f}%"
-        }
+            blockchain_info = rpc.getblockchaininfo()
+            logging.debug(f"Got blockchain info: {blockchain_info.get('chain', 'unknown')}")
+
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Node info collection timed out getting blockchain info")
+
+            peers = rpc.getconnectioncount()
+            logging.debug(f"Got connection count: {peers}")
+
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Node info collection timed out getting peer count")
+
+            # Prepare return value before logging
+            result = {
+                'chain': blockchain_info.get('chain', 'unknown'),
+                'blocks': blockchain_info.get('blocks', 0),
+                'peers': peers,
+                'progress': f"{blockchain_info.get('verificationprogress', 0)*100:.2f}%"
+            }
+
+            logging.debug("Finished collecting node info successfully")
+            return result
+
+        except TimeoutError as e:
+            logging.error(f"Timeout while collecting node info: {str(e)}")
+            raise
+        except Exception as e:
+            logging.error(f"Error collecting node info: {str(e)}")
+            raise
 
     @classmethod
     def cleanup_threads(cls):

@@ -173,15 +173,20 @@ class NodeSettingsFrame(ttk.Frame):
         self.status_label.config(text="Checking connection...", foreground="gray")
         self.status_indicator.config(foreground="gray")
 
-        try:
-            success = BitcoinUtils.test_connection_async()
-            if success:
-                # Schedule first status check
-                self.after(1000, self._check_connection_status)  # Increased initial delay
-            else:
-                self._handle_connection_failure("Failed to initiate connection test")
-        except Exception as e:
-            self._handle_connection_failure(str(e))
+        def async_check():
+            try:
+                success = BitcoinUtils.test_connection_async()
+                if success:
+                    # Schedule first status check with increased delay
+                    self.after(1000, self._check_connection_status)
+                else:
+                    self._handle_connection_failure("Failed to initiate connection test")
+            except Exception as e:
+                self._handle_connection_failure(str(e))
+
+        # Run check in separate thread
+        self.after(0, async_check)
+        logging.debug("Async connection check initiated")
 
     def _check_connection_status(self):
         """Check the result of async connection test with improved error handling."""
@@ -208,24 +213,44 @@ class NodeSettingsFrame(ttk.Frame):
     def _handle_connection_success(self):
         """Handle successful connection with error catching."""
         try:
-            node_info = self.bitcoin_utils.get_node_info()
-            self.status_indicator.config(foreground="green")
-            self.status_label.config(text="Connected", foreground="green")
+            # Add timeout for node info retrieval
+            timeout = 5  # 5 seconds timeout
+            start_time = time.time()
 
-            status_text = (
-                f"Connected to Bitcoin Node\n"
-                f"Network: {node_info['chain']}\n"
-                f"Block Height: {node_info['blocks']:,}\n"
-                f"Connected Peers: {node_info['peers']}"
-            )
+            def update_ui():
+                if time.time() - start_time > timeout:
+                    raise TimeoutError("Node info retrieval timed out")
 
-            self.info_text.delete(1.0, tk.END)
-            self.info_text.insert(tk.END, status_text)
+                node_info = self.bitcoin_utils.get_node_info()
+                logging.debug("Retrieved node info for UI update")
 
+                self.status_indicator.config(foreground="green")
+                self.status_label.config(text="Connected", foreground="green")
+                logging.debug("Updated status indicators")
+
+                status_text = (
+                    f"Connected to Bitcoin Node\n"
+                    f"Network: {node_info['chain']}\n"
+                    f"Block Height: {node_info['blocks']:,}\n"
+                    f"Connected Peers: {node_info['peers']}\n"
+                    f"Sync Progress: {node_info.get('progress', 'N/A')}" #Handle missing key
+                )
+
+                self.info_text.delete(1.0, tk.END)
+                self.info_text.insert(tk.END, status_text)
+                logging.debug("Updated info text")
+
+            # Schedule UI update on main thread
+            self.after(0, update_ui)
+            logging.debug("Scheduled UI update")
+
+        except TimeoutError as e:
+            self._handle_connection_failure(f"Operation timed out: {str(e)}")
         except Exception as e:
             self._handle_connection_failure(f"Error getting node info: {str(e)}")
         finally:
             self._check_pending = False
+            logging.debug("Connection check completed")
 
     def _handle_connection_failure(self, error_msg: str):
         """Handle connection failure with cleanup."""
@@ -265,6 +290,7 @@ class NodeSettingsFrame(ttk.Frame):
         if self._connection_check_after:
             self.after_cancel(self._connection_check_after)
         self._check_pending = False  # Ensure no pending checks remain
+
 
 
 class SummaryTab(ttk.Frame):
