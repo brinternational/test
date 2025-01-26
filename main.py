@@ -9,6 +9,7 @@ from typing import Dict
 from bitcoin_utils import BitcoinUtils
 import json
 import socket
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -28,7 +29,8 @@ class NodeSettingsFrame(ttk.Frame):
         self.bitcoin_utils = BitcoinUtils()
         self._connection_check_after = None
         self._check_pending = False
-        self.simulation_mode = False
+        self._last_check_time = 0
+        self._check_interval = 5000  # 5 seconds between checks
         self.setup_ui()
         self.start_connection_check()
         logging.debug("NodeSettingsFrame initialization complete")
@@ -152,95 +154,117 @@ class NodeSettingsFrame(ttk.Frame):
             messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
 
     def check_connection(self):
-        """Test connection to Bitcoin node with non-blocking checks."""
+        """Test connection to Bitcoin node with improved async handling."""
+        current_time = time.time() * 1000  # Convert to milliseconds
+
+        # Prevent multiple simultaneous checks
         if self._check_pending:
+            logging.debug("Connection check already in progress")
+            return
+
+        # Enforce minimum interval between checks
+        if current_time - self._last_check_time < self._check_interval:
+            logging.debug("Skipping connection check - too soon")
             return
 
         logging.debug("Starting node connection check")
         self._check_pending = True
+        self._last_check_time = current_time
+        self.status_label.config(text="Checking connection...", foreground="gray")
+        self.status_indicator.config(foreground="gray")
 
         try:
             success = BitcoinUtils.test_connection_async()
-            logging.debug(f"Connection test initiated: {success}")
             if success:
-                # Schedule status check
-                self.after(100, self._check_connection_status)
+                # Schedule first status check
+                self.after(1000, self._check_connection_status)  # Increased initial delay
             else:
-                self.enable_simulation_mode("Failed to start connection test")
-                self._check_pending = False
+                self._handle_connection_failure("Failed to initiate connection test")
         except Exception as e:
-            logging.error(f"Connection check error: {str(e)}", exc_info=True)
-            self.enable_simulation_mode(str(e))
-            self._check_pending = False
+            self._handle_connection_failure(str(e))
 
     def _check_connection_status(self):
-        """Check the result of async connection test."""
+        """Check the result of async connection test with improved error handling."""
+        if not hasattr(self, 'status_label'):  # Check if widget still exists
+            return
+
         try:
             status, error = BitcoinUtils.get_connection_status()
+
             if status is None:
-                # Test still pending, check again in 100ms
-                self.after(100, self._check_connection_status)
+                # Still waiting for result, check again in 1 second
+                if self._check_pending:  # Only reschedule if still pending
+                    self.after(1000, self._check_connection_status)
                 return
 
-            self._check_pending = False
-
             if status:
-                try:
-                    node_info = self.bitcoin_utils.get_node_info()
-                    logging.info(f"Connected to node - Info: {node_info}")
-                    self.status_indicator.config(foreground="green")
-                    self.status_label.config(text="Connected", foreground="green")
-
-                    status_text = (
-                        f"Connected to Bitcoin Node\n"
-                        f"Network: {node_info['chain']}\n"
-                        f"Block Height: {node_info['blocks']:,}\n"
-                        f"Connected Peers: {node_info['peers']}"
-                    )
-
-                    self.info_text.delete(1.0, tk.END)
-                    self.info_text.insert(tk.END, status_text)
-                    self.simulation_mode = False
-                except Exception as e:
-                    logging.error(f"Error getting node info: {str(e)}", exc_info=True)
-                    self.enable_simulation_mode(str(e))
+                self._handle_connection_success()
             else:
-                logging.warning(f"Node connection failed: {error}")
-                self.enable_simulation_mode(error)
+                self._handle_connection_failure(error)
+
         except Exception as e:
-            logging.error(f"Error checking connection status: {str(e)}", exc_info=True)
-            self.enable_simulation_mode(str(e))
+            self._handle_connection_failure(f"Error checking connection: {str(e)}")
+
+    def _handle_connection_success(self):
+        """Handle successful connection with error catching."""
+        try:
+            node_info = self.bitcoin_utils.get_node_info()
+            self.status_indicator.config(foreground="green")
+            self.status_label.config(text="Connected", foreground="green")
+
+            status_text = (
+                f"Connected to Bitcoin Node\n"
+                f"Network: {node_info['chain']}\n"
+                f"Block Height: {node_info['blocks']:,}\n"
+                f"Connected Peers: {node_info['peers']}"
+            )
+
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(tk.END, status_text)
+
+        except Exception as e:
+            self._handle_connection_failure(f"Error getting node info: {str(e)}")
+        finally:
             self._check_pending = False
 
-    def enable_simulation_mode(self, error_msg):
-        """Enable simulation mode with appropriate UI updates."""
-        self.simulation_mode = True
-        self.status_indicator.config(foreground="orange")
-        self.status_label.config(text="Simulation Mode", foreground="orange")
+    def _handle_connection_failure(self, error_msg: str):
+        """Handle connection failure with cleanup."""
+        logging.warning(f"Connection failed: {error_msg}")
+        self.status_indicator.config(foreground="red")
+        self.status_label.config(text="Not Connected", foreground="red")
 
         status_text = (
-            f"Running in Simulation Mode\n"
-            f"Node Error: {error_msg}\n\n"
-            f"The application will run with simulated data.\n"
-            f"Some features may be limited."
+            f"Bitcoin Node Connection Failed\n"
+            f"Error: {error_msg}\n\n"
+            f"Please check:\n"
+            f"1. Bitcoin Core is running\n"
+            f"2. RPC settings are correct\n"
+            f"3. Network connectivity"
         )
 
         self.info_text.delete(1.0, tk.END)
         self.info_text.insert(tk.END, status_text)
+        self._check_pending = False
 
     def start_connection_check(self):
-        """Start periodic connection checks in a non-blocking way."""
+        """Start periodic connection checks with improved scheduling."""
         def schedule_check():
             if hasattr(self, 'status_label'):
                 self.check_connection()
-                self._connection_check_after = self.after(5000, schedule_check)
+                # Schedule next check using class interval
+                self._connection_check_after = self.after(
+                    self._check_interval, 
+                    schedule_check
+                )
 
+        # Start first check
         schedule_check()
 
     def on_destroy(self):
-        """Clean up scheduled tasks."""
+        """Clean up scheduled tasks and pending operations."""
         if self._connection_check_after:
             self.after_cancel(self._connection_check_after)
+        self._check_pending = False  # Ensure no pending checks remain
 
 
 class SummaryTab(ttk.Frame):
@@ -297,7 +321,6 @@ class WalletScannerTab(ttk.Frame):
         self.scanner = WalletScanner()
         self._stats_update_after_id = None
         self._is_updating = False
-        self.simulation_mode = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -403,23 +426,14 @@ class WalletScannerTab(ttk.Frame):
 
 
     def toggle_scanning(self):
-        """Toggle wallet scanning with simulation mode support."""
+        """Toggle wallet scanning."""
         try:
-            # Check if we're in simulation mode
-            if hasattr(self.master.master, 'node_settings'):
-                self.simulation_mode = self.master.master.node_settings.simulation_mode
-
-            if not self.simulation_mode:
-                # Try connecting to node before starting
-                success = BitcoinUtils.test_connection_async()
-                if not success:
-                    if messagebox.askyesno(
-                        "Node Connection Failed",
-                        "Bitcoin node connection failed. Would you like to continue in simulation mode?"
-                    ):
-                        self.simulation_mode = True
-                    else:
-                        return
+            if not BitcoinUtils.test_connection_async():
+                messagebox.showerror(
+                    "Node Connection Failed",
+                    "Bitcoin node connection failed. Please check your connection settings."
+                )
+                return
 
             # Start or stop scanning based on current state
             if not self.scanner.scanning:
@@ -436,12 +450,13 @@ class WalletScannerTab(ttk.Frame):
             return
 
         try:
-            self.scanner.start_scan(simulation_mode=self.simulation_mode)
+            self.scanner.start_scan()
             self.start_btn.config(text="■ Stop", state='normal')
+            self.stop_btn.config(state='normal')
             self.thread_spinbox.config(state='disabled')
             self.schedule_stats_update()
 
-            logging.info(f"Scanner started in tab {self.tab_id} (Simulation: {self.simulation_mode})")
+            logging.info(f"Scanner started in tab {self.tab_id}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start scanner: {str(e)}")
             logging.error(f"Failed to start scanner in tab {self.tab_id}: {str(e)}")
@@ -454,6 +469,7 @@ class WalletScannerTab(ttk.Frame):
         try:
             self.scanner.stop_scan()
             self.start_btn.config(text="▶ Start", state='normal')
+            self.stop_btn.config(state='disabled')
             self.thread_spinbox.config(state='normal')
             logging.info(f"Scanner stopped in tab {self.tab_id}")
         except Exception as e:

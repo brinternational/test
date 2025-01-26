@@ -8,7 +8,7 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 import logging
 import time
 import socket
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from queue import Queue
 from datetime import datetime
 
@@ -30,6 +30,8 @@ class BitcoinUtils:
     _instance_lock = Lock()
     _connection_timeout = 5
     _rpc_timeout = 30
+    _connection_threads = []
+    _shutdown_event = Event()
 
     @classmethod
     def generate_checksum(cls, payload: bytes) -> bytes:
@@ -339,14 +341,41 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
         }
 
     @classmethod
+    def cleanup_threads(cls):
+        """Clean up any zombie connection test threads."""
+        current_time = time.time()
+        active_threads = []
+
+        for thread, start_time in cls._connection_threads:
+            if thread.is_alive():
+                if current_time - start_time > cls._connection_timeout:
+                    logging.warning(f"Force stopping thread {thread.name} - exceeded timeout")
+                    cls._shutdown_event.set()  # Signal thread to stop
+                else:
+                    active_threads.append((thread, start_time))
+            else:
+                thread.join(0)  # Clean up completed thread immediately
+
+        cls._connection_threads = active_threads
+
+    @classmethod
     def test_connection_async(cls):
-        """Asynchronously test connection to Bitcoin node."""
+        """Asynchronously test connection to Bitcoin node with proper cleanup."""
         try:
+            # Clean up old threads first
+            cls.cleanup_threads()
+
             # Clear previous results
             while not cls._connection_queue.empty():
                 cls._connection_queue.get_nowait()
 
+            # Reset shutdown event
+            cls._shutdown_event.clear()
+
             def _test_connection():
+                if cls._shutdown_event.is_set():
+                    return
+
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(2)  # Shorter timeout for initial test
@@ -355,23 +384,33 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
                         logging.debug(f"Testing socket connection to {cls.NODE_URL}:{cls.NODE_PORT}")
                         sock.connect((cls.NODE_URL, int(cls.NODE_PORT)))
 
-                        # Only report success if we can make a basic RPC call
+                        if cls._shutdown_event.is_set():
+                            return
+
+                        # Only try RPC if socket connection succeeded
                         try:
                             rpc_url = f"http://{cls.RPC_USER}:{cls.RPC_PASS}@{cls.NODE_URL}:{cls.NODE_PORT}"
                             rpc = AuthServiceProxy(rpc_url, timeout=5)
-                            rpc.getblockcount()
-                            cls._connection_queue.put((True, None))
+                            rpc.getblockcount()  # Simple test command
+                            if not cls._shutdown_event.is_set():
+                                cls._connection_queue.put((True, None))
                         except Exception as e:
-                            cls._connection_queue.put((False, f"RPC Error: {str(e)}"))
+                            if not cls._shutdown_event.is_set():
+                                cls._connection_queue.put((False, f"RPC Error: {str(e)}"))
                     except Exception as e:
-                        cls._connection_queue.put((False, f"Socket Error: {str(e)}"))
+                        if not cls._shutdown_event.is_set():
+                            cls._connection_queue.put((False, f"Socket Error: {str(e)}"))
                     finally:
                         sock.close()
                 except Exception as e:
-                    cls._connection_queue.put((False, str(e)))
+                    if not cls._shutdown_event.is_set():
+                        cls._connection_queue.put((False, str(e)))
 
-            thread = Thread(target=_test_connection, name="NodeConnectionTest", daemon=True)
+            thread = Thread(target=_test_connection, name=f"NodeConnectionTest-{time.time()}", daemon=True)
             thread.start()
+
+            # Store thread with its start time for cleanup
+            cls._connection_threads.append((thread, time.time()))
             return True
 
         except Exception as e:
@@ -380,7 +419,7 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
 
     @classmethod
     def get_connection_status(cls):
-        """Get the result of the last async connection test."""
+        """Get the result of the last async connection test with timeout handling."""
         try:
             if not cls._connection_queue.empty():
                 success, error = cls._connection_queue.get_nowait()
@@ -390,3 +429,5 @@ last_updated={datetime.now().strftime('%Y-%m-%d')}
             return None, "Test pending"
         except Exception as e:
             return False, str(e)
+        finally:
+            cls.cleanup_threads()  # Clean up any completed or timed out threads
