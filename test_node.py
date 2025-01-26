@@ -21,9 +21,6 @@ def test_bitcoin_node():
         return success
     except Exception as e:
         print(f"Error testing node connection: {str(e)}", file=sys.stderr)
-        print("Falling back to educational simulation mode")
-        print(f"Mock Chain: {BitcoinUtils.MOCK_NETWORK}")
-        print(f"Mock Blocks: {BitcoinUtils.MOCK_BLOCKCHAIN_HEIGHT}")
         return False
 
 if __name__ == "__main__":
